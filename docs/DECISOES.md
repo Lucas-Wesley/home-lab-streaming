@@ -9,7 +9,7 @@
 
 ## 1. Onde paramos
 
-**Primeira versão pronta e testada no Mac (09/11/2026), ainda não publicada.** Tem:
+**No ar desde 10/11/2026** em `https://192.168.1.20:8446` (dados do Mac levados junto: acesso, chaves, legendas, torrents). Tem:
 
 - **Acesso colado em Ajustes** (S2): a mensagem do provedor como veio, ou só o link M3U. O servidor confere com o
   provedor e mostra situação, validade e conexões, nunca a senha.
@@ -62,7 +62,7 @@
 
 **Próximos passos** (ordem sugerida):
 
-1. **Publicar** (porta 8446, e 8447 para as telas) e instalar o PWA no celular.
+1. **Instalar o PWA no celular** (`https://192.168.1.20:8446`; publicado em 10/11/2026).
 2. Conferir no uso: formatos que o navegador do celular não toca (`mkv`, H.265) e o ao vivo na TV.
 3. Ligar a TV pelo celular (S9: Wake-on-LAN e a API local da Samsung).
 4. Guia de programação (EPG) nos canais.
@@ -79,7 +79,7 @@
 | S5 | **Uma reprodução por vez**: quem começa a assistir (o player chama `POST /api/reproducao`, ou o comando para uma tela) passa a ser o dono da assinatura; pedidos de outro vídeo recebem 409 e a tela que tocava recebe "parar" | A assinatura aceita 1 conexão; dois aparelhos ao mesmo tempo derrubariam os dois. |
 | S6 | Ao vivo em **HLS** no app (lista reescrita para passar pelo servidor, com cada endereço assinado por HMAC) e em **TS contínuo** nas telas; filmes e episódios pelo arquivo, com Range | O navegador não toca TS; a TV toca TS e não precisa do HLS. A assinatura impede que o servidor vire um repasse aberto. |
 | S7 | **O servidor é o centro do controle**: o celular pede "tocar X na tela Y" à API, e o servidor fala com a tela | O celular não precisa achar a TV nem saber o protocolo dela. Funciona do PWA, **sem app Flutter**. |
-| S8 | **Telas por DLNA, sem instalar nada**: o servidor procura renderizadores por SSDP (no grupo e em cada endereço de `REDE_LOCAL`, porque o projetor só responde à busca dirigida a ele) e manda `SetAVTransportURI` + `Play`, com os cabeçalhos DLNA (`contentFeatures.dlna.org`) que dizem se dá para avançar | Os dois aparelhos da casa tocaram assim. Sem os cabeçalhos, a TV recusa avançar (erro 701). No XML, só entidades nomeadas: a Samsung recusa `&#34;` (erro 402). |
+| S8 | **Telas por DLNA, sem instalar nada**: o servidor procura renderizadores por SSDP (no grupo e em cada endereço de `REDE_LOCAL`, porque o projetor só responde à busca dirigida a ele) e manda `SetAVTransportURI` + `Play`, com os cabeçalhos DLNA (`contentFeatures.dlna.org`) que dizem se dá para avançar. Em produção, a busca sai do **procurador** (o mesmo binário, `/app procurador`, com a rede do servidor, em `172.17.0.1:8452`), e o app pede a ele (`PROCURADOR_DE_TELAS`) | Os dois aparelhos da casa tocaram assim. Na rede do Docker, o multicast não sai para a casa e o projetor responde de outra porta, que o NAT descarta. Sem os cabeçalhos, a TV recusa avançar (erro 701). No XML, só entidades nomeadas: a Samsung recusa `&#34;` (erro 402). |
 | S9 | Na Samsung, usar a **API local da TV** (WebSocket nas portas 8001/8002, `TokenAuthSupport`) para ligar e mandar teclas, quando precisar; ela pede permissão na TV na primeira vez | Para "Assistir na TV" com a TV desligada. Ainda não feito. |
 | S10 | Esconder categorias adultas por padrão, com opção em Ajustes | Estão misturadas em canais, filmes e séries. |
 | S11 | A porta das telas (**8447**) é publicada direto pelo container, em HTTP, e só tem `/tela/...` | O DLNA não confia na autoridade certificadora do homelab. A API fica só na porta do Caddy. |

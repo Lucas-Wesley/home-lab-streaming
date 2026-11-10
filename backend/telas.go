@@ -63,10 +63,12 @@ type controleDasTelas struct {
 	intervalo time.Duration
 	// O projetor leva um tempo para dizer que só pausou no Stop: confere depois desta espera.
 	esperaDoStop time.Duration
+	// Endereço do procurador de telas (procurador.go); vazio, a busca SSDP sai daqui mesmo.
+	procurador string
 }
 
 func novoControleDasTelas(a *app) *controleDasTelas {
-	c := &controleDasTelas{a: a, sessoes: map[string]sessao{}, enderecos: map[string]tela{}, http: &http.Client{Timeout: 8 * time.Second}, httpDoSeek: &http.Client{Timeout: 12 * time.Second}, intervalo: 15 * time.Second, esperaDoStop: time.Second}
+	c := &controleDasTelas{a: a, sessoes: map[string]sessao{}, enderecos: map[string]tela{}, http: &http.Client{Timeout: 8 * time.Second}, httpDoSeek: &http.Client{Timeout: 12 * time.Second}, intervalo: 15 * time.Second, esperaDoStop: time.Second, procurador: strings.TrimRight(env("PROCURADOR_DE_TELAS", ""), "/")}
 	// Outro aparelho assumiu a assinatura: a tela que tocava para, em vez de ficar com erro na tela.
 	a.conexao.aoTrocarDeDono = func(anterior string) {
 		t, err := a.tela(context.Background(), anterior)
@@ -228,12 +230,6 @@ const buscaSSDP = "M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"s
 // procurar manda a busca SSDP para o grupo e também para cada endereço da rede local: o projetor
 // só responde à busca dirigida a ele.
 func (c *controleDasTelas) procurar(ctx context.Context) ([]string, error) {
-	conn, err := net.ListenUDP("udp4", &net.UDPAddr{})
-	if err != nil {
-		return nil, err
-	}
-	defer conn.Close()
-
 	alvos := []string{"239.255.255.250"}
 	for _, rede := range redesLocais() {
 		alvos = append(alvos, enderecosDa(rede)...)
@@ -243,30 +239,13 @@ func (c *controleDasTelas) procurar(ctx context.Context) ([]string, error) {
 			alvos = append(alvos, t.Endereco)
 		}
 	}
-	for volta := 0; volta < 2; volta++ {
-		for _, ip := range alvos {
-			_, _ = conn.WriteToUDP([]byte(buscaSSDP), &net.UDPAddr{IP: net.ParseIP(ip), Port: portaSSDP})
-		}
-	}
-
-	locais := map[string]bool{}
-	fim := time.Now().Add(3 * time.Second)
-	buf := make([]byte, 8192)
-	for time.Now().Before(fim) && ctx.Err() == nil {
-		_ = conn.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
-		n, _, err := conn.ReadFromUDP(buf)
-		if err != nil {
-			continue
-		}
-		for _, linha := range strings.Split(string(buf[:n]), "\r\n") {
-			if k, v, ok := strings.Cut(linha, ":"); ok && strings.EqualFold(strings.TrimSpace(k), "location") {
-				locais[strings.TrimSpace(v)] = true
-			}
-		}
+	locais, err := c.buscarLocais(ctx, alvos, 3*time.Second, false)
+	if err != nil {
+		return nil, err
 	}
 
 	var achadas []string
-	for local := range locais {
+	for _, local := range locais {
 		t, err := c.lerDescricao(ctx, local)
 		if err != nil {
 			log.Printf("tela em %s: %v", local, err)
@@ -536,7 +515,7 @@ func (c *controleDasTelas) maisNova(t tela) tela {
 // na rede toda (o IP pode ter mudado).
 func (c *controleDasTelas) reencontrar(ctx context.Context, t tela) (tela, error) {
 	var nova tela
-	local, err := perguntarSSDP(ctx, t.Endereco)
+	local, err := c.perguntarSSDP(ctx, t.Endereco)
 	if err == nil {
 		nova, err = c.lerDescricao(ctx, local)
 	}
@@ -561,34 +540,15 @@ func (c *controleDasTelas) reencontrar(ctx context.Context, t tela) (tela, error
 }
 
 // perguntarSSDP manda a busca só para um IP e devolve a primeira descrição que ele indicar.
-func perguntarSSDP(ctx context.Context, ip string) (string, error) {
-	conn, err := net.ListenUDP("udp4", &net.UDPAddr{})
+func (c *controleDasTelas) perguntarSSDP(ctx context.Context, ip string) (string, error) {
+	locais, err := c.buscarLocais(ctx, []string{ip}, 2*time.Second, true)
 	if err != nil {
 		return "", err
 	}
-	defer conn.Close()
-	destino := &net.UDPAddr{IP: net.ParseIP(ip), Port: portaSSDP}
-	fim := time.Now().Add(2 * time.Second)
-	if d, ok := ctx.Deadline(); ok && d.Before(fim) {
-		fim = d
+	if len(locais) == 0 {
+		return "", errTelaSemResposta
 	}
-	buf := make([]byte, 8192)
-	for envio := 0; time.Now().Before(fim); envio++ {
-		if envio < 3 {
-			_, _ = conn.WriteToUDP([]byte(buscaSSDP), destino)
-		}
-		_ = conn.SetReadDeadline(time.Now().Add(400 * time.Millisecond))
-		n, _, err := conn.ReadFromUDP(buf)
-		if err != nil {
-			continue
-		}
-		for _, linha := range strings.Split(string(buf[:n]), "\r\n") {
-			if k, v, ok := strings.Cut(linha, ":"); ok && strings.EqualFold(strings.TrimSpace(k), "location") {
-				return strings.TrimSpace(v), nil
-			}
-		}
-	}
-	return "", errTelaSemResposta
+	return locais[0], nil
 }
 
 // ---------- Tocar e controlar ----------

@@ -25,7 +25,8 @@ Mesma infraestrutura e mesmo design system (`docs/DESIGN-SYSTEM.md`) das outras 
   mostrar ou registrar.
 - **DLNA:** XML só com entidades nomeadas (`escaparXML`); a TV Samsung recusa `&#34;`. Vídeo para tela sempre com os
   cabeçalhos `contentFeatures.dlna.org` (sem eles, a TV não avança). O projetor muda de porta ao reiniciar e lembra
-  endereços já tocados: todo comando passa por `chamar` (acha a tela de novo) e cada envio tem endereço novo (S13, S14).
+  endereços já tocados: todo comando passa por `chamar` (acha a tela de novo) e cada envio tem endereço novo (S13, S14). Em produção a busca
+  SSDP passa pelo procurador (`procurador.go`): não mandar SSDP direto, usar `buscarLocais`.
 - **Busca de torrents e legendas** (S19–S21): Prowlarr, TMDB e OpenSubtitles pela API, com endereço e chaves no banco
   (`ajustes`), nunca no código. A chave do Prowlarr não vai ao navegador (`semChave`) nem aparece em erros. Nos testes, `prowlarrFalso`,
   `tmdbFalso` e `openSubtitlesFalso`.

@@ -273,9 +273,20 @@ func TestRelogioESegundos(t *testing.T) {
 	}
 }
 
-// O projetor Android muda a porta do DLNA quando reinicia: o comando acha a tela de novo e funciona.
+// O projetor Android muda a porta do DLNA quando reinicia: o comando acha a tela de novo e funciona,
+// com a busca feita aqui mesmo ou pelo procurador (produção).
 func TestTelaQueMudouDePorta(t *testing.T) {
+	t.Run("busca aqui", func(t *testing.T) { testarTelaQueMudouDePorta(t, false) })
+	t.Run("pelo procurador", func(t *testing.T) { testarTelaQueMudouDePorta(t, true) })
+}
+
+func testarTelaQueMudouDePorta(t *testing.T, comProcurador bool) {
 	e := novoAmbiente(t)
+	if comProcurador {
+		p := httptest.NewServer(procuradorDeTelas())
+		t.Cleanup(p.Close)
+		e.a.telas.procurador = p.URL
+	}
 	tv := novaTVFalsa(t)
 	te := registrarTV(t, e, tv)
 

@@ -24,6 +24,12 @@ var version = "dev"
 var webDist embed.FS
 
 func main() {
+	// "/app procurador": só a busca de telas, com a rede do servidor (procurador.go).
+	if len(os.Args) > 1 && os.Args[1] == "procurador" {
+		srv := &http.Server{Addr: env("ADDR", "127.0.0.1:8452"), Handler: procuradorDeTelas(), ReadHeaderTimeout: 5 * time.Second}
+		log.Printf("procurador de telas %s em %s", version, srv.Addr)
+		log.Fatal(srv.ListenAndServe())
+	}
 	dataDir := env("DATA_DIR", "./data")
 	addr := env("ADDR", ":8080")
 	// As telas (TV, projetor) buscam o vídeo por HTTP simples: o DLNA não confia na nossa autoridade certificadora.

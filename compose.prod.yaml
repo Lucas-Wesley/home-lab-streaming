@@ -16,10 +16,27 @@ services:
       PARAKEET_URL: http://parakeet:8000
       # App Flashcards (S31): a frase tocada na legenda vira cartão no baralho Inglês.
       FLASHCARDS_URL: http://flashcards:8080
+      # A busca das telas (SSDP) fica com o procurador, que está na rede do servidor.
+      PROCURADOR_DE_TELAS: http://host.docker.internal:8452
+    extra_hosts:
+      - host.docker.internal:host-gateway
     volumes:
       - /srv/data/streaming:/data
     networks:
       - proxy
+
+  # O mesmo binário, só com a busca de telas: o multicast do SSDP não sai da rede do Docker, e o
+  # projetor responde de outra porta, que o NAT descarta. Escuta só na ponte do Docker (docker0).
+  procurador:
+    image: streaming:${VERSION:-dev}
+    pull_policy: never
+    command: ["procurador"]
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      ADDR: 172.17.0.1:8452
+    depends_on:
+      - streaming
 
 networks:
   proxy:

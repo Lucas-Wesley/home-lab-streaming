@@ -510,7 +510,7 @@ func (a *app) arquivo(ctx context.Context, id int64) (arquivoDeTorrent, torrentG
 // tituloDoArquivo: o título do torrent, mais o episódio quando é série.
 func tituloDoArquivo(f arquivoDeTorrent, t torrentGuardado) string {
 	if f.Episodio > 0 {
-		return fmt.Sprintf("%s T%d E%d", t.Titulo, f.Temporada, f.Episodio)
+		return fmt.Sprintf("%s T%d E%d", primeiro(nomeDoTorrent(t.Titulo), t.Titulo), f.Temporada, f.Episodio)
 	}
 	videos := t.Videos
 	if videos > 1 {

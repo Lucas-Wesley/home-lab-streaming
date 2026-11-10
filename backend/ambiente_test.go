@@ -29,6 +29,7 @@ func novoAmbiente(t *testing.T) *ambiente {
 	t.Setenv("CLAUDE_BIN", filepath.Join(t.TempDir(), "sem-claude"))
 	t.Setenv("WHISPER_URL", "")
 	t.Setenv("PARAKEET_URL", "")
+	t.Setenv("FLASHCARDS_URL", "")
 	db, err := abrirBanco(filepath.Join(t.TempDir(), "teste.db"))
 	if err != nil {
 		t.Fatal(err)

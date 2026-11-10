@@ -55,3 +55,40 @@ export function sincroniaLegivel(l) {
   if (!l.atraso) return 'sem atraso'
   return l.atraso > 0 ? `atrasada ${s} s` : `adiantada ${s} s`
 }
+
+// lerVTT transforma o WebVTT em falas { inicio, fim, texto }, em segundos e sem marcas (<i>, {\an8}).
+export function lerVTT(texto) {
+  const segundos = (t) => {
+    const p = t.trim().replace(',', '.').split(':').map(Number)
+    return p.length === 3 ? p[0] * 3600 + p[1] * 60 + p[2] : p[0] * 60 + p[1]
+  }
+  const falas = []
+  for (const bloco of texto.replace(/\r/g, '').split(/\n{2,}/)) {
+    const linhas = bloco.split('\n')
+    const i = linhas.findIndex((l) => l.includes('-->'))
+    if (i < 0) continue
+    const [ini, fim] = linhas[i].split('-->')
+    const fala = linhas
+      .slice(i + 1)
+      .join('\n')
+      .replace(/<[^>]+>|\{[^}]*\}/g, '')
+      .trim()
+    if (fala) falas.push({ inicio: segundos(ini), fim: segundos(fim.trim().split(/\s+/)[0]), texto: fala })
+  }
+  return falas.sort((a, b) => a.inicio - b.inicio)
+}
+
+// falaAtual: o índice da última fala que já começou (-1 antes da primeira).
+export function falaAtual(falas, posicao) {
+  let lo = 0
+  let hi = falas.length - 1
+  let achada = -1
+  while (lo <= hi) {
+    const meio = (lo + hi) >> 1
+    if (falas[meio].inicio <= posicao) {
+      achada = meio
+      lo = meio + 1
+    } else hi = meio - 1
+  }
+  return achada
+}

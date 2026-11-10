@@ -14,6 +14,8 @@ services:
       WHISPER_URL: http://whisper:8000
       # Parakeet compartilhado do homelab (S29): gera legendas pelo áudio.
       PARAKEET_URL: http://parakeet:8000
+      # App Flashcards (S31): a frase tocada na legenda vira cartão no baralho Inglês.
+      FLASHCARDS_URL: http://flashcards:8080
     volumes:
       - /srv/data/streaming:/data
     networks:

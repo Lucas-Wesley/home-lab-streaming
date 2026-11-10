@@ -3,6 +3,7 @@ import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue'
 import EscolherLegenda from './EscolherLegenda.vue'
 import Folha from './Folha.vue'
 import Icone from './Icone.vue'
+import LegendaAoVivo from './LegendaAoVivo.vue'
 import { api } from './api.js'
 import { esperarAjuste } from './legendas.js'
 import { carregarTelas, comandar, telas, tocarNaTela } from './telas.js'
@@ -25,11 +26,23 @@ const aoVivo = computed(() => sessao.value?.ao_vivo)
 const posicao = computed(() => arrastando.value ?? estado.value?.posicao ?? 0)
 const parada = computed(() => !sessao.value && ['STOPPED', 'NO_MEDIA_PRESENT'].includes(estado.value?.estado))
 
+// A legenda no celular (S31) precisa do segundo exato: entre uma leitura e outra (1,5 s), o tempo
+// anda pelo relógio do celular enquanto a tela toca.
+const lidoEm = ref(0)
+const agora = ref(Date.now())
+const versaoDaLegenda = ref(0)
+const posicaoAoVivo = computed(() => {
+  const p = estado.value?.posicao || 0
+  return estado.value?.estado === 'PLAYING' ? p + Math.min(5, (agora.value - lidoEm.value) / 1000) : p
+})
+
 let relogioDoEstado
+let relogioDaLegenda
 async function lerEstado() {
   if (document.visibilityState !== 'visible') return
   try {
     estado.value = await api(`/api/telas/${encodeURIComponent(props.id)}/estado`, { tempo: 6000 })
+    lidoEm.value = Date.now()
     erro.value = ''
   } catch (e) {
     erro.value = e.message
@@ -64,12 +77,14 @@ function mudarVolume(delta) {
 // A legenda só entra na tela junto com o vídeo: escolher outra, ou ajustar a sincronia, manda o
 // vídeo de novo, do mesmo ponto.
 const escolhendoLegenda = ref(false)
+const temLegenda = ref(false) // a legenda passa no celular: a capa fica pequena
 async function reenviar(mensagem) {
   const s = sessao.value
   if (!s || !tela.value) return
   ocupado.value = true
   try {
     await tocarNaTela(tela.value, s.chave, { posicao: estado.value?.posicao || 0, capa: s.capa })
+    versaoDaLegenda.value++
     recado(mensagem)
     await lerEstado()
   } catch (e) {
@@ -128,11 +143,13 @@ onMounted(() => {
   carregarTelas()
   lerEstado()
   relogioDoEstado = setInterval(lerEstado, 1500)
+  relogioDaLegenda = setInterval(() => (agora.value = Date.now()), 250)
   document.addEventListener('visibilitychange', lerEstado)
 })
 
 onBeforeUnmount(() => {
   clearInterval(relogioDoEstado)
+  clearInterval(relogioDaLegenda)
   document.removeEventListener('visibilitychange', lerEstado)
 })
 </script>
@@ -144,7 +161,7 @@ onBeforeUnmount(() => {
       <span class="onde"><Icone nome="tela" />{{ tela?.nome || 'Tela' }}</span>
     </header>
 
-    <div class="corpo">
+    <div class="corpo" :class="{ 'com-legenda': temLegenda }">
       <div class="capa">
         <img v-if="sessao?.capa" :src="sessao.capa" alt="" referrerpolicy="no-referrer" />
         <Icone v-else nome="tela" />
@@ -157,6 +174,8 @@ onBeforeUnmount(() => {
         <template v-else-if="estado?.estado === 'PAUSED_PLAYBACK'">Pausado</template>
         <template v-else-if="parada">Escolha algo no Início e toque no nome desta tela.</template>
       </p>
+
+      <LegendaAoVivo v-if="sessao && !aoVivo" :key="sessao.chave" :chave="sessao.chave" :posicao="posicaoAoVivo" :versao="versaoDaLegenda" @falas="temLegenda = $event" />
 
       <div v-if="sessao && !aoVivo && estado?.duracao" class="tempo">
         <input
@@ -234,6 +253,7 @@ onBeforeUnmount(() => {
 
 .corpo {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   justify-items: center;
   gap: 4px;
   max-width: 420px;
@@ -265,8 +285,14 @@ onBeforeUnmount(() => {
   height: 48px;
 }
 
+.com-legenda .capa {
+  width: 72px;
+  margin-bottom: 10px;
+}
+
 h1 {
   margin: 0;
+  overflow-wrap: anywhere;
   font-size: 1.3rem;
   font-weight: 700;
   letter-spacing: -0.015em;

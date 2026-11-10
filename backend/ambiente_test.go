@@ -32,6 +32,7 @@ func novoAmbiente(t *testing.T) *ambiente {
 	t.Setenv("PARAKEET_URL", "")
 	t.Setenv("FLASHCARDS_URL", "")
 	t.Setenv("PROCURADOR_DE_TELAS", "")
+	t.Setenv("AGENDA_URL", "http://127.0.0.1:1/") // nada de ge de verdade
 	db, err := abrirBanco(filepath.Join(t.TempDir(), "teste.db"))
 	if err != nil {
 		t.Fatal(err)

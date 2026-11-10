@@ -239,11 +239,10 @@ func anoDe(it itemDoProvedor) string {
 	return ""
 }
 
-var semAcento = transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC)
-
-// normalizar deixa o texto em minúsculas e sem acento, para a busca achar "acao" em "Ação".
+// normalizar deixa o texto em minúsculas e sem acento, para a busca achar "acao" em "Ação". O
+// transformador guarda estado: um por chamada, porque dois pedidos ao mesmo tempo o quebravam.
 func normalizar(s string) string {
-	t, _, err := transform.String(semAcento, s)
+	t, _, err := transform.String(transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC), s)
 	if err != nil {
 		t = s
 	}

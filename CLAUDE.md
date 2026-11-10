@@ -3,7 +3,7 @@
 App do **ecossistema de apps pessoais do Lucas**: central de streaming (canais, filmes e séries de uma assinatura
 IPTV) com o celular como controle remoto da TV e do projetor.
 
-**Comece lendo:** [`docs/DECISOES.md`](docs/DECISOES.md) — estado atual, decisões (S1–S32) e próximos passos.
+**Comece lendo:** [`docs/DECISOES.md`](docs/DECISOES.md) — estado atual, decisões (S1–S33) e próximos passos.
 
 ## Em uma frase
 O servidor guarda o acesso e o catálogo, repassa o vídeo do provedor (para o PWA em `/api/video`, para as telas em
@@ -41,4 +41,6 @@ Mesma infraestrutura e mesmo design system (`docs/DESIGN-SYSTEM.md`) das outras 
   (a biblioteca entra em pânico com híbridos). Não chamar `AddTorrent`/`AddMagnet` direto.
 - **Torrents** (S17): o motor só fica ligado enquanto um `uso` o segura;
   todo código novo que precise dele chama `motor.usar()` e `soltar(folga)`. Nos testes, `semDHT` e um web seed local.
+- **Jogos do dia** (S33): a agenda do ge é lida da página (`jogosDaPagina`); nos testes, `AGENDA_URL` aponta para
+  `agendaFalsa` (ou para um endereço fechado, em `novoAmbiente` e no Playwright). Nada de ge de verdade nos testes.
 - **Commits:** autoria do Lucas; **sem linha `Co-Authored-By`**.

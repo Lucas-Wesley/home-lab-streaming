@@ -85,6 +85,8 @@ func newServer(a *app, web fs.FS, version string) http.Handler {
 	mux.HandleFunc("PUT /api/progresso/{chave}", a.handleGuardarProgresso)
 	mux.HandleFunc("DELETE /api/progresso/{chave}", a.handleApagarProgresso)
 
+	mux.HandleFunc("GET /api/jogos", a.handleJogos)
+	mux.HandleFunc("GET /api/canais/esportes", a.handleCanaisDeEsportes)
 	mux.HandleFunc("GET /api/telas", a.handleTelas)
 	mux.HandleFunc("POST /api/telas/procurar", a.handleProcurarTelas)
 	mux.HandleFunc("GET /api/telas/sessoes", a.handleSessoes)

@@ -23,10 +23,10 @@ export default defineConfig({
           url: 'http://localhost:8097/player_api.php',
         },
         {
-          // Sem procurar telas na rede de casa: REDE_LOCAL aponta para uma rede vazia.
+          // Sem procurar telas na rede de casa (REDE_LOCAL aponta para uma rede vazia) nem ir ao ge.
           command: `rm -rf "${dados}" && go run .`,
           cwd: '../backend',
-          env: { DATA_DIR: dados, ADDR: ':8098', ADDR_TELAS: ':8096', REDE_LOCAL: '192.0.2.0/30', CATALOGO_A_CADA: '0' },
+          env: { DATA_DIR: dados, ADDR: ':8098', ADDR_TELAS: ':8096', REDE_LOCAL: '192.0.2.0/30', CATALOGO_A_CADA: '0', AGENDA_URL: 'http://127.0.0.1:1/' },
           url: 'http://localhost:8098/api/health',
         },
         {

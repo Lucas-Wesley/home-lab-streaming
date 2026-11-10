@@ -38,8 +38,12 @@ test('do acesso colado até a página da série', async ({ page }) => {
   await page.getByRole('button', { name: /O meio/ }).click()
   await expect(page.getByRole('dialog')).toContainText('T1 E2')
 
-  // Canais: a categoria adulta fica escondida.
+  // Canais: os jogos do dia (sem o ge no teste, só o aviso) e o caminho para todos os canais.
   await page.goto('/#/canais')
+  await expect(page.getByRole('heading', { name: 'Jogos' })).toBeVisible()
+  await page.getByRole('link', { name: 'Todos os canais' }).click()
+  await expect(page.getByRole('heading', { name: 'Todos os canais' })).toBeVisible()
+  // A categoria adulta fica escondida.
   await expect(page.getByText('Jornal 24h')).toBeVisible()
   await expect(page.getByText('Canal Adulto')).toHaveCount(0)
 

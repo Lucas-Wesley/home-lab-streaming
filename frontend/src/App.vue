@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, provide, ref } from 'vue'
 import Ajustes from './Ajustes.vue'
 import BarraDoControle from './BarraDoControle.vue'
+import Canais from './Canais.vue'
 import Catalogo from './Catalogo.vue'
 import Controle from './Controle.vue'
 import Favoritos from './Favoritos.vue'
@@ -117,7 +118,13 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', aoMudarHash))
       <Controle v-else-if="rota.nome === 'controle'" :key="rota.param" :id="rota.param" />
       <Filme v-else-if="rota.nome === 'filme'" :key="rota.param" :id="rota.param" />
       <Serie v-else-if="rota.nome === 'serie'" :key="rota.param" :id="rota.param" />
-      <Catalogo v-else-if="rota.nome === 'canais'" :key="`canal${rota.param}`" tipo="canal" :categoria="rota.param" />
+      <Catalogo
+        v-else-if="rota.nome === 'canais' && rota.param.startsWith('todos')"
+        :key="`canal${rota.param}`"
+        tipo="canal"
+        :categoria="rota.param.replace(/^todos\/?/, '')"
+      />
+      <Canais v-else-if="rota.nome === 'canais'" />
       <Catalogo v-else-if="rota.nome === 'filmes'" :key="`filme${rota.param}`" tipo="filme" :categoria="rota.param" />
       <Catalogo v-else-if="rota.nome === 'series'" :key="`serie${rota.param}`" tipo="serie" :categoria="rota.param" />
       <Favoritos v-else-if="rota.nome === 'favoritos'" />

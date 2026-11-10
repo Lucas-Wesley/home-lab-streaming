@@ -7,6 +7,7 @@ package provedorfalso
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -36,6 +37,16 @@ type Provedor struct {
 	Arquivo []byte
 	// Lento faz a entrega demorar (para cortar uma leitura no meio), em nanossegundos.
 	Lento atomic.Int64
+	// CanaisExtras entram na categoria "ESPORTES" (12), e Guia é a programação de cada canal
+	// (get_short_epg): os testes dos jogos do dia. Ficam vazios no resto.
+	CanaisExtras []map[string]any
+	Guia         map[int64][]Programa
+}
+
+// Programa é uma linha do guia; o painel manda título e descrição em base64.
+type Programa struct {
+	Titulo      string
+	Inicio, Fim time.Time
 }
 
 func (p *Provedor) Handler() http.Handler {
@@ -75,16 +86,31 @@ func (p *Provedor) api(w http.ResponseWriter, r *http.Request) {
 		escrever(w, []map[string]any{
 			{"category_id": "10", "category_name": "CANAIS | NOTICIAS"},
 			{"category_id": "11", "category_name": "CANAIS | XXX ADULTOS"},
+			{"category_id": "12", "category_name": "CANAIS | ESPORTES"},
 		})
 	case "get_vod_categories":
 		escrever(w, []map[string]any{{"category_id": "20", "category_name": "FILMES | AÇÃO"}})
 	case "get_series_categories":
 		escrever(w, []map[string]any{{"category_id": "30", "category_name": "SÉRIES | NETFLIX"}})
 	case "get_live_streams":
-		escrever(w, []map[string]any{
+		escrever(w, append([]map[string]any{
 			{"num": 1, "name": "Jornal 24h", "stream_id": 100, "stream_icon": "", "category_id": "10", "added": "1700000000"},
 			{"num": 2, "name": "Canal Adulto", "stream_id": 101, "stream_icon": "", "category_id": "11", "added": "1700000000"},
-		})
+		}, p.CanaisExtras...))
+	case "get_short_epg":
+		var id int64
+		fmt.Sscan(q.Get("stream_id"), &id)
+		lista := []map[string]any{}
+		for _, pr := range p.Guia[id] {
+			lista = append(lista, map[string]any{
+				"title":           base64.StdEncoding.EncodeToString([]byte(pr.Titulo)),
+				"description":     "",
+				"start":           pr.Inicio.UTC().Format("2006-01-02 15:04:05"),
+				"start_timestamp": fmt.Sprint(pr.Inicio.Unix()),
+				"stop_timestamp":  fmt.Sprint(pr.Fim.Unix()),
+			})
+		}
+		escrever(w, map[string]any{"epg_listings": lista})
 	case "get_vod_streams":
 		escrever(w, []map[string]any{
 			{"num": 1, "name": "Missão Explosiva", "stream_id": 200, "stream_icon": "", "rating": "7.5", "category_id": "20", "container_extension": "mp4", "added": "1700000100"},

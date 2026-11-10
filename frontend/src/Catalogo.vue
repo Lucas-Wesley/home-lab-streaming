@@ -3,15 +3,15 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import Grade from './Grade.vue'
 import { api, lembrar } from './api.js'
 
-// Canais, Filmes ou Séries: as categorias do provedor em pílulas e os itens da escolhida, que
+// Todos os canais (a página Canais tem os jogos e os de esporte, S33), Filmes ou Séries: as categorias do provedor em pílulas e os itens da escolhida, que
 // vão carregando conforme a página desce.
 const props = defineProps({
   tipo: { type: String, required: true },
   categoria: { type: String, default: '' },
 })
 
-const TITULOS = { canal: 'Canais', filme: 'Filmes', serie: 'Séries' }
-const ROTAS = { canal: 'canais', filme: 'filmes', serie: 'series' }
+const TITULOS = { canal: 'Todos os canais', filme: 'Filmes', serie: 'Séries' }
+const ROTAS = { canal: 'canais/todos', filme: 'filmes', serie: 'series' }
 const POR_VEZ = 60
 
 const categorias = ref([])

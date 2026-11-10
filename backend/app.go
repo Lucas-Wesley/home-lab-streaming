@@ -63,9 +63,12 @@ type app struct {
 	legendasAcordar   chan struct{}
 	liberarMu         sync.Mutex
 	liberarParaOAudio map[string]bool
-	sincMu            sync.Mutex
-	sincroni          estadoDaSincronizacao
-	agora             func() time.Time
+	// Jogos do dia (S33): a agenda do ge e o guia dos canais, guardados por um tempo.
+	agenda   agendaDosJogos
+	guias    guiasDosCanais
+	sincMu   sync.Mutex
+	sincroni estadoDaSincronizacao
+	agora    func() time.Time
 	// emFundo roda trabalho fora do pedido (a sincronização); nos testes, roda na hora.
 	emFundo func(func())
 }

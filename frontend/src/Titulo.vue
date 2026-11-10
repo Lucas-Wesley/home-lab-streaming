@@ -11,8 +11,9 @@ import { ajusteDaVerificacao, carregarVerificacoes, recomendavel, verificacoes, 
 import { voltar } from './voltar.js'
 
 // Um filme ou série do TMDB e onde assisti-lo (S20, S28): a assinatura primeiro, se tiver, e os
-// torrents organizados: versões do filme; na série, temporada por temporada, com o pacote da
-// temporada e cada episódio. A melhor versão de torrent vem marcada. É a tela final para assistir.
+// torrents organizados: versões do filme; na série, só os episódios, temporada por temporada (os
+// pacotes da temporada ou da série ficam de fora). Abrir um episódio mostra a assinatura e as versões
+// avulsas dele; com poucas, busca pelo episódio ("Nome S02E05"). A melhor versão vem marcada.
 const props = defineProps({ param: { type: String, required: true } })
 const [tipo, id] = props.param.split('/')
 
@@ -25,11 +26,14 @@ const procurando = ref(false)
 const erroDosTorrents = ref('')
 const temporada = ref(0)
 const episodios = ref({}) // número da temporada → episódios do TMDB
-const episodioAberto = ref(null)
+const daEpisodio = ref({}) // "temporada:número" → torrents da busca por aquele episódio
+const procurandoEpisodio = ref(false)
+const numeroAberto = ref(0) // episódio com a folha aberta
 const verTodas = ref({}) // seção → mostrar as opções escondidas
 const filmesDaAssinatura = ref([]) // { id, nome, capa, posicao }
 const episodiosDaAssinatura = ref({}) // "temporada:número" → episódio do provedor
 const downloads = ref({}) // chave → download da assinatura
+const outrosServicos = ref([]) // Netflix, HBO Max… que têm o título (S30)
 
 const POUCAS = 3
 
@@ -37,7 +41,7 @@ const ehSerie = tipo === 'serie'
 const temporadas = computed(() => {
   const lista = (titulo.value?.temporadas || []).filter((s) => s.numero > 0 && s.episodios > 0)
   const especiais = (titulo.value?.temporadas || []).find((s) => s.numero === 0)
-  return especiais && pacotesDe(0).length + Object.keys(episodiosComTorrent(0)).length ? [...lista, especiais] : lista
+  return especiais && Object.keys(episodiosComTorrent(0)).length ? [...lista, especiais] : lista
 })
 
 // Junta as opções das duas buscas (a geral e a da temporada), sem repetir, melhores primeiro. A
@@ -57,9 +61,8 @@ function juntar(...listas) {
   return todas
 }
 
-const fontes = (n) => [geral.value, daTemporada.value[n]].filter(Boolean)
+const fontes = (n) => [geral.value, daTemporada.value[n], ...Object.entries(daEpisodio.value).filter(([k]) => k.startsWith(`${n}:`)).map(([, r]) => r)].filter(Boolean)
 const organizadaDe = (fonte, n) => (fonte.temporadas || []).find((s) => s.numero === n)
-const pacotesDe = (n) => juntar(...fontes(n).map((f) => organizadaDe(f, n)?.pacotes || []))
 function episodiosComTorrent(n) {
   const porEpisodio = {}
   for (const f of fontes(n)) {
@@ -71,9 +74,8 @@ function episodiosComTorrent(n) {
 }
 
 const versoes = computed(() => juntar(geral.value?.versoes || []))
-const completas = computed(() => juntar(...[geral.value, ...Object.values(daTemporada.value)].filter(Boolean).map((f) => f.completas || [])))
-const outros = computed(() => juntar(...[geral.value, ...Object.values(daTemporada.value)].filter(Boolean).map((f) => f.outros || [])))
-const pacotes = computed(() => pacotesDe(temporada.value))
+// Na série, "outros" (o nome não diz o episódio) são quase sempre pacotes: ficam de fora também.
+const outros = computed(() => (ehSerie ? [] : juntar(geral.value?.outros || [])))
 const torrentsDosEpisodios = computed(() => episodiosComTorrent(temporada.value))
 
 // A lista de episódios vem do TMDB; um episódio com torrent que o TMDB ainda não lista entra também.
@@ -92,6 +94,20 @@ const listaDeEpisodios = computed(() => {
     .sort((a, b) => a.numero - b.numero)
     .map((e) => ({ ...e, opcoes: torrentsDosEpisodios.value[e.numero] || [], assinatura: episodiosDaAssinatura.value[`${temporada.value}:${e.numero}`] || null }))
 })
+const episodioAberto = computed(() => (numeroAberto.value ? listaDeEpisodios.value.find((e) => e.numero === numeroAberto.value) : null))
+
+const hoje = new Date().toISOString().slice(0, 10)
+const aindaNaoSaiu = (e) => e.data && e.data > hoje && !e.opcoes.length && !e.assinatura
+const dataCurta = (d) => new Date(`${d}T12:00:00`).toLocaleDateString('pt-BR', { day: 'numeric', month: 'short', year: 'numeric' })
+
+function detalhesDoEpisodio(e) {
+  const partes = []
+  if (e.duracao) partes.push(`${e.duracao} min`)
+  if (aindaNaoSaiu(e)) partes.push(`estreia em ${dataCurta(e.data)}`)
+  else if (e.opcoes.length) partes.push(`${e.opcoes.length} ${e.opcoes.length === 1 ? 'versão' : 'versões'} de torrent`)
+  else if (!e.assinatura) partes.push('toque para procurar')
+  return partes.join(' · ')
+}
 
 const rotuloDoEpisodio = (e) => `${titulo.value?.titulo} · T${temporada.value} E${e.numero}`
 
@@ -129,10 +145,7 @@ const visiveis = (secao, ops) => (verTodas.value[secao] ? ops : ops.filter((o) =
 const escondidas = (secao, ops) => ops.length - visiveis(secao, ops).length
 
 const buscasFeitas = computed(() => [...(geral.value?.buscas || []), ...(daTemporada.value[temporada.value]?.buscas || [])])
-const nenhumTorrent = computed(() => {
-  if (!geral.value) return false
-  return ehSerie ? !geral.value.total && !Object.values(daTemporada.value).some((d) => d.total) : !versoes.value.length && !outros.value.length
-})
+const nenhumTorrent = computed(() => !ehSerie && geral.value && !versoes.value.length && !outros.value.length)
 
 // As verificações já feitas vêm junto; as melhores opções ainda não verificadas são verificadas
 // sozinhas: as 3 primeiras e, se alguma der errado, as seguintes, até 5 por página.
@@ -149,10 +162,7 @@ function autoVerificar() {
   let alvos
   if (ehSerie) {
     const primeiroEp = listaDeEpisodios.value.find((e) => e.opcoes.length)
-    alvos = [
-      ...pacotes.value.filter((o) => !o.pesado).slice(0, 2).map((o) => [o, { temporada: temporada.value, episodio: 1 }]),
-      ...(primeiroEp ? [[primeiroEp.opcoes[0], { temporada: temporada.value, episodio: primeiroEp.numero }]] : []),
-    ]
+    alvos = primeiroEp ? [[primeiroEp.opcoes[0], { temporada: temporada.value, episodio: primeiroEp.numero }]] : []
   } else {
     alvos = versoes.value.filter((o) => !o.pesado && !o.suspeito).map((o) => [o, {}])
   }
@@ -185,6 +195,33 @@ async function buscarTorrents(n = 0) {
     erroDosTorrents.value = e.message
   } finally {
     procurando.value = false
+  }
+}
+
+// Abrir um episódio: as duas melhores versões avulsas são verificadas; com poucas, busca por ele.
+async function abrirEpisodio(e) {
+  numeroAberto.value = e.numero
+  const n = temporada.value
+  const k = `${n}:${e.numero}`
+  if (e.opcoes.length < POUCAS && !daEpisodio.value[k]) {
+    procurandoEpisodio.value = true
+    try {
+      const r = await api(`/api/titulos/${tipo}/${id}/torrents?temporada=${n}&episodio=${e.numero}`, { tempo: 100000 })
+      daEpisodio.value = { ...daEpisodio.value, [k]: r }
+      await carregarVerificacoes(chavesDe(r))
+    } catch {
+      daEpisodio.value = { ...daEpisodio.value, [k]: { temporadas: [] } }
+    } finally {
+      procurandoEpisodio.value = false
+    }
+  }
+  const aberto = episodioAberto.value
+  if (!aberto || temporada.value !== n) return
+  for (const o of aberto.opcoes.filter((o) => !o.pesado).slice(0, 2)) {
+    if (!verificacoes[o.chave] && !pedidas.has(o.chave)) {
+      pedidas.add(o.chave)
+      verificar(o, { tmdb: props.param, temporada: n, episodio: aberto.numero })
+    }
   }
 }
 
@@ -228,6 +265,9 @@ onMounted(async () => {
     return
   }
   carregarAssinatura()
+  api(`/api/titulos/${tipo}/${id}/onde`, { tempo: 20000 })
+    .then((l) => (outrosServicos.value = l))
+    .catch(() => {})
   await buscarTorrents()
   if (ehSerie && temporadas.value.length) {
     const lembrada = Number(lembrar(`temporada-tmdb:${id}`))
@@ -255,6 +295,14 @@ onMounted(async () => {
             <BotaoFavorito :tipo="assinatura[0].tipo" :id="assinatura[0].id" />
           </div>
           <p v-if="titulo.sinopse" class="sinopse">{{ titulo.sinopse }}</p>
+          <div v-if="outrosServicos.length" class="servicos">
+            <span class="rotulo-servicos">Também em</span>
+            <a v-for="o in outrosServicos" :key="o.servico" class="servico" :href="o.link" target="_blank" rel="noopener" :title="o.direto ? `Abrir no ${o.servico}` : `Ver onde assistir no TMDB`">
+              <img v-if="o.logo" :src="o.logo" alt="" referrerpolicy="no-referrer" />
+              <span class="nome-servico">{{ o.servico }}</span>
+              <span v-if="o.como !== 'assinatura'" class="como">{{ o.como }}</span>
+            </a>
+          </div>
         </div>
       </header>
 
@@ -276,7 +324,7 @@ onMounted(async () => {
       <p v-else-if="nenhumTorrent && !procurando" class="vazio">Nenhum torrent deste título nos indexadores.</p>
 
       <!-- Série -->
-      <template v-if="ehSerie && geral">
+      <template v-if="ehSerie && (geral || erroDosTorrents)">
         <div v-if="temporadas.length" class="pilulas" role="tablist">
           <button
             v-for="s in temporadas"
@@ -291,43 +339,27 @@ onMounted(async () => {
           </button>
         </div>
 
-        <template v-if="pacotes.length">
-          <p class="rotulo">Temporada {{ temporada }} completa</p>
-          <ul class="lista">
-            <li v-for="o in visiveis(`pacotes${temporada}`, pacotes)" :key="o.chave"><OpcaoDeTorrent :r="o" :tmdb="param" :temporada="temporada" :episodio="1" :rotulo="`${titulo.titulo} · T${temporada} E1`" :capa="titulo.capa" baixar-temporada /></li>
-          </ul>
-          <button v-if="escondidas(`pacotes${temporada}`, pacotes)" class="mais" @click="verTodas[`pacotes${temporada}`] = true">
-            Mostrar mais {{ escondidas(`pacotes${temporada}`, pacotes) }}
-          </button>
-        </template>
-
         <p class="rotulo">Episódios <span v-if="procurando" class="procurando">procurando…</span></p>
-        <ul class="lista">
+        <ul class="lista episodios">
           <li v-for="e in listaDeEpisodios" :key="e.numero">
-            <button class="episodio" :disabled="!e.opcoes.length && !e.assinatura && !pacotes.length" @click="episodioAberto = e">
-              <span class="numero">E{{ e.numero }}</span>
-              <span class="texto">
-                <span class="nome">{{ e.nome || `Episódio ${e.numero}` }}</span>
-                <span v-if="e.assinatura" class="detalhes na-assinatura-ep"><Icone nome="canais" />Na assinatura{{ e.opcoes.length ? ` · ${e.opcoes.length} ${e.opcoes.length === 1 ? 'versão' : 'versões'} de torrent` : '' }}</span>
-                <span v-else-if="e.opcoes.length" class="detalhes">
-                  {{ e.opcoes.length }} {{ e.opcoes.length === 1 ? 'opção' : 'opções' }} · melhor: {{ e.opcoes[0].qualidade.join(' ') || '?' }}, {{ tamanho(e.opcoes[0].tamanho) }},
-                  {{ e.opcoes[0].semeadores }} {{ e.opcoes[0].semeadores === 1 ? 'semeador' : 'semeadores' }}
-                </span>
-                <span v-else class="detalhes">{{ pacotes.length || completas.length ? 'só no pacote da temporada ou da série' : 'nenhum torrent avulso' }}</span>
+            <button class="episodio" :disabled="aindaNaoSaiu(e)" @click="abrirEpisodio(e)">
+              <span class="still">
+                <img v-if="e.imagem" :src="e.imagem" alt="" loading="lazy" referrerpolicy="no-referrer" />
+                <span v-else>E{{ e.numero }}</span>
               </span>
-              <span v-if="e.opcoes.length || e.assinatura || pacotes.length" class="ir"><Icone nome="avancar" /></span>
+              <span class="texto">
+                <span class="nome"><span class="numero">{{ e.numero }}.</span> {{ e.nome || `Episódio ${e.numero}` }}</span>
+                <span class="detalhes">
+                  <span v-if="e.assinatura" class="na-assinatura-ep"><Icone nome="canais" />Na assinatura</span>
+                  <span v-if="detalhesDoEpisodio(e)">{{ detalhesDoEpisodio(e) }}</span>
+                </span>
+                <span v-if="e.sinopse" class="resumo">{{ e.sinopse }}</span>
+              </span>
+              <span v-if="!aindaNaoSaiu(e)" class="ir"><Icone nome="avancar" /></span>
             </button>
           </li>
         </ul>
         <p v-if="!listaDeEpisodios.length && !procurando" class="vazio">Sem episódios nesta temporada.</p>
-
-        <template v-if="completas.length">
-          <p class="rotulo">Série completa ou várias temporadas</p>
-          <ul class="lista">
-            <li v-for="o in visiveis('completas', completas)" :key="o.chave"><OpcaoDeTorrent :r="o" :tmdb="param" :temporada="1" :episodio="1" :rotulo="`${titulo.titulo} · T1 E1`" :capa="titulo.capa" /></li>
-          </ul>
-          <button v-if="escondidas('completas', completas)" class="mais" @click="verTodas.completas = true">Mostrar mais {{ escondidas('completas', completas) }}</button>
-        </template>
       </template>
 
       <template v-if="outros.length">
@@ -340,10 +372,10 @@ onMounted(async () => {
       </template>
 
       <p v-if="buscasFeitas.length" class="suave nota buscas">Buscado nos indexadores: {{ buscasFeitas.map((b) => `“${b}”`).join(', ') }}.</p>
-      <p class="suave nota">Dados de filmes e séries: TMDB.</p>
+      <p class="suave nota">Dados de filmes e séries: TMDB.<template v-if="outrosServicos.length"> Onde assistir: JustWatch.</template></p>
     </template>
 
-    <Folha v-if="episodioAberto" :titulo="`E${episodioAberto.numero} · ${episodioAberto.nome || `Episódio ${episodioAberto.numero}`}`" @fechar="episodioAberto = null">
+    <Folha v-if="episodioAberto" :titulo="`E${episodioAberto.numero} · ${episodioAberto.nome || `Episódio ${episodioAberto.numero}`}`" @fechar="numeroAberto = 0">
       <p v-if="episodioAberto.sinopse" class="suave sinopse-do-episodio">{{ episodioAberto.sinopse }}</p>
       <ul class="lista">
         <li v-if="episodioAberto.assinatura">
@@ -356,18 +388,15 @@ onMounted(async () => {
             :download="downloads[`episodio:${episodioAberto.assinatura.id}`]"
           />
         </li>
-        <li v-for="o in episodioAberto.opcoes" :key="o.chave">
+        <li v-for="o in visiveis(`ep${temporada}:${episodioAberto.numero}`, episodioAberto.opcoes)" :key="o.chave">
           <OpcaoDeTorrent :r="o" :tmdb="param" :temporada="temporada" :episodio="episodioAberto.numero" :rotulo="rotuloDoEpisodio(episodioAberto)" :capa="titulo.capa" :sem-destaque="!!episodioAberto.assinatura" />
         </li>
       </ul>
-      <template v-if="pacotes.length">
-        <p class="rotulo">Dentro da temporada completa</p>
-        <ul class="lista">
-          <li v-for="o in pacotes.slice(0, POUCAS)" :key="'p' + o.chave">
-            <OpcaoDeTorrent :r="o" :tmdb="param" :temporada="temporada" :episodio="episodioAberto.numero" :rotulo="rotuloDoEpisodio(episodioAberto)" :capa="titulo.capa" />
-          </li>
-        </ul>
-      </template>
+      <button v-if="escondidas(`ep${temporada}:${episodioAberto.numero}`, episodioAberto.opcoes)" class="mais" @click="verTodas[`ep${temporada}:${episodioAberto.numero}`] = true">
+        Mostrar mais {{ escondidas(`ep${temporada}:${episodioAberto.numero}`, episodioAberto.opcoes) }}
+      </button>
+      <p v-if="procurandoEpisodio" class="vazio">Procurando este episódio nos indexadores…</p>
+      <p v-else-if="!episodioAberto.opcoes.length && !episodioAberto.assinatura" class="vazio">Nenhuma versão avulsa deste episódio nos indexadores.</p>
     </Folha>
   </div>
 </template>
@@ -470,6 +499,48 @@ h1 {
   line-height: 1.6;
 }
 
+.servicos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 16px;
+}
+
+.rotulo-servicos {
+  margin-right: 2px;
+  color: var(--texto-suave);
+  font-size: 0.82rem;
+}
+
+.servico {
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+  padding: 4px 11px 4px 4px;
+  border: 1px solid var(--linha-forte);
+  border-radius: 999px;
+  color: var(--texto);
+  font-size: 0.84rem;
+  font-weight: 550;
+  text-decoration: none;
+}
+
+.servico:hover {
+  border-color: var(--texto-fraco);
+}
+
+.servico img {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+}
+
+.servico .como {
+  color: var(--texto-fraco);
+  font-weight: 400;
+}
+
 .pilulas {
   display: flex;
   gap: 4px;
@@ -492,8 +563,8 @@ h1 {
 
 .episodio {
   display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: 12px;
+  grid-template-columns: 148px minmax(0, 1fr) auto;
+  gap: 14px;
   align-items: center;
   width: 100%;
   padding: 12px 0;
@@ -506,21 +577,35 @@ h1 {
 
 .episodio:disabled {
   cursor: default;
+  opacity: 0.6;
 }
 
-.episodio:disabled .nome {
-  color: var(--texto-suave);
+.still {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: var(--raio-p);
+  background: var(--superficie);
+  color: var(--texto-fraco);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.still img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .numero {
-  min-width: 34px;
   color: var(--texto-fraco);
   font-variant-numeric: tabular-nums;
 }
 
 .texto {
   display: grid;
-  gap: 3px;
+  gap: 4px;
   min-width: 0;
 }
 
@@ -534,8 +619,21 @@ h1 {
 }
 
 .detalhes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
   color: var(--texto-fraco);
   font-size: 0.8rem;
+}
+
+.resumo {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--texto-suave);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .ir svg {
@@ -569,6 +667,17 @@ h1 {
   margin: -4px 0 8px;
   font-size: 0.88rem;
   line-height: 1.5;
+}
+
+@media (max-width: 560px) {
+  .episodio {
+    grid-template-columns: 112px minmax(0, 1fr) auto;
+    gap: 12px;
+  }
+
+  .resumo {
+    display: none;
+  }
 }
 
 @media (max-width: 820px) {

@@ -12,6 +12,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"os"
 	"strconv"
@@ -55,13 +56,15 @@ type controleDasTelas struct {
 	// enderecos guarda onde cada tela foi achada de novo, quando mudou de porta ou de IP.
 	enderecos map[string]tela
 	http      *http.Client
+	// A Samsung só responde ao Seek quando já tem o vídeo do novo ponto: com torrent, passa de 8 s.
+	httpDoSeek *http.Client
 	// Enquanto uma tela toca, o servidor pergunta a posição a cada intervalo e guarda: o celular
 	// pode estar fechado, e "Continuar assistindo" tem de saber onde o vídeo parou na TV.
 	intervalo time.Duration
 }
 
 func novoControleDasTelas(a *app) *controleDasTelas {
-	c := &controleDasTelas{a: a, sessoes: map[string]sessao{}, enderecos: map[string]tela{}, http: &http.Client{Timeout: 8 * time.Second}, intervalo: 15 * time.Second}
+	c := &controleDasTelas{a: a, sessoes: map[string]sessao{}, enderecos: map[string]tela{}, http: &http.Client{Timeout: 8 * time.Second}, httpDoSeek: &http.Client{Timeout: 12 * time.Second}, intervalo: 15 * time.Second}
 	// Outro aparelho assumiu a assinatura: a tela que tocava para, em vez de ficar com erro na tela.
 	a.conexao.aoTrocarDeDono = func(anterior string) {
 		t, err := a.tela(context.Background(), anterior)
@@ -98,8 +101,11 @@ func (c *controleDasTelas) acompanhar(t tela, desde string) {
 }
 
 // atualizarLegendaGerada: a tela só lê a legenda quando o vídeo chega. Se a legenda gerada que ela
-// recebeu está acabando e já há mais pronta (ou ficou completa), manda o vídeo de novo, do mesmo
-// ponto. Com o Parakeet bem à frente, isso acontece uma ou duas vezes num filme.
+// recebeu está acabando e já há bem mais pronta (8 min à frente) ou ficou completa, manda o vídeo
+// de novo, do mesmo ponto. Cada envio apaga a imagem por uns segundos: com pouco à frente, mandar a
+// cada minuto ouvido faria a TV recarregar várias vezes seguidas. Num episódio, são uns 2 envios.
+const folgaParaReenviar = 8 * 60.0
+
 func (c *controleDasTelas) atualizarLegendaGerada(t tela, s sessao, posicao float64) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
@@ -109,7 +115,7 @@ func (c *controleDasTelas) atualizarLegendaGerada(t tela, s sessao, posicao floa
 	}
 	agora := c.a.coberturaDaGerada(ctx, s.Chave, posicao)
 	acabando := posicao > s.legendaAte-45
-	if !acabando || (agora < s.legendaAte+60 && !(g.Estado == "pronta" && agora > s.legendaAte)) {
+	if !acabando || (agora < posicao+folgaParaReenviar && !(g.Estado == "pronta" && agora > s.legendaAte)) {
 		return
 	}
 	m := reChaveDeVideo.FindStringSubmatch(s.Chave)
@@ -407,8 +413,18 @@ func (c *controleDasTelas) soap(ctx context.Context, controle, servico, acao str
 	}
 	req.Header.Set("Content-Type", `text/xml; charset="utf-8"`)
 	req.Header.Set("SOAPACTION", fmt.Sprintf(`"%s#%s"`, servico, acao))
-	resp, err := c.http.Do(req)
+	conectou := false
+	req = req.WithContext(httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{GotConn: func(httptrace.GotConnInfo) { conectou = true }}))
+	cliente := c.http
+	if acao == "Seek" {
+		cliente = c.httpDoSeek
+	}
+	resp, err := cliente.Do(req)
 	if err != nil {
+		var ne net.Error
+		if conectou && errors.As(err, &ne) && ne.Timeout() {
+			return nil, errTelaDemorou
+		}
 		return nil, errTelaSemResposta
 	}
 	defer resp.Body.Close()
@@ -446,6 +462,10 @@ const (
 )
 
 var errTelaSemResposta = errors.New("a tela não respondeu: está ligada e na mesma rede?")
+
+// errTelaDemorou: a tela recebeu o pedido e não respondeu a tempo. Ela está ali: repetir o comando
+// (como depois de errTelaSemResposta) faria a TV buscar o ponto duas vezes, e a imagem apagar de novo.
+var errTelaDemorou = errors.New("a tela demorou a responder")
 
 func (c *controleDasTelas) acao(ctx context.Context, t tela, acao string, args [][2]string) (map[string]string, error) {
 	return c.chamar(ctx, t, false, acao, append([][2]string{{"InstanceID", "0"}}, args...))
@@ -770,6 +790,9 @@ func (c *controleDasTelas) comandar(ctx context.Context, t tela, comando string,
 		c.mu.Unlock()
 	case "ir":
 		_, err = c.acao(ctx, t, "Seek", [][2]string{{"Unit", "REL_TIME"}, {"Target", relogio(max(0, valor))}})
+		if errors.Is(err, errTelaDemorou) {
+			err = nil // a TV está indo; o próximo estado mostra onde chegou
+		}
 	case "pular":
 		pos, e := c.acao(ctx, t, "GetPositionInfo", nil)
 		if e != nil {
@@ -780,6 +803,9 @@ func (c *controleDasTelas) comandar(ctx context.Context, t tela, comando string,
 			alvo = min(alvo, d-2)
 		}
 		_, err = c.acao(ctx, t, "Seek", [][2]string{{"Unit", "REL_TIME"}, {"Target", relogio(alvo)}})
+		if errors.Is(err, errTelaDemorou) {
+			err = nil
+		}
 	case "volume", "mudo":
 		if comando == "volume" {
 			_, err = c.acaoDeVolume(ctx, t, "SetVolume", [][2]string{{"DesiredVolume", strconv.Itoa(int(max(0, min(100, valor))))}})

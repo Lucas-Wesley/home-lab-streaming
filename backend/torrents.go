@@ -948,6 +948,9 @@ func (a *app) servirArquivoDeTorrent(w http.ResponseWriter, r *http.Request, id 
 	defer leitor.Close()
 	leitor.SetContext(r.Context())
 	leitor.SetReadahead(8 << 20)
+	if paraTela {
+		leitor.SetReadahead(32 << 20) // a TV guarda pouco à frente: um engasgo do torrent vira tela preta
+	}
 	leitor.SetResponsive()
 	http.ServeContent(w, r, nome, time.Time{}, leitor)
 }

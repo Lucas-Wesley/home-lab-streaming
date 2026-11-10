@@ -269,7 +269,7 @@ func TestLegendaGeradaNaTela(t *testing.T) {
 	te := registrarTV(t, e, tv)
 	ctx := context.Background()
 	chave := "filme:200"
-	e.a.db.Exec(`INSERT INTO legendas_geradas (chave, idioma, duracao, estado, criado_em) VALUES (?, 'en', 600, 'gerando', '2026-11-10T00:00:00Z')`, chave)
+	e.a.db.Exec(`INSERT INTO legendas_geradas (chave, idioma, duracao, estado, criado_em) VALUES (?, 'en', 1200, 'gerando', '2026-11-10T00:00:00Z')`, chave)
 	for b := 0; b < 3; b++ {
 		e.a.db.Exec(`INSERT INTO blocos_gerados (chave, bloco, palavras) VALUES (?, ?, '[]')`, chave, b)
 	}
@@ -299,12 +299,20 @@ func TestLegendaGeradaNaTela(t *testing.T) {
 	if envios() != 1 {
 		t.Fatal("não devia mandar de novo ainda")
 	}
-	// Perto do fim, sem legenda nova: nada. Com mais 4 minutos prontos: manda de novo.
+	// Perto do fim, sem legenda nova: nada. Com só mais 4 minutos, também não: cada envio apaga a
+	// imagem, e a TV recarregaria a cada pouco. Com 8 minutos à frente de quem assiste: manda de novo.
 	e.a.telas.atualizarLegendaGerada(te, s, 150)
 	if envios() != 1 {
 		t.Fatal("sem legenda nova, não adianta mandar de novo")
 	}
 	for b := 3; b < 7; b++ {
+		e.a.db.Exec(`INSERT INTO blocos_gerados (chave, bloco, palavras) VALUES (?, ?, '[]')`, chave, b)
+	}
+	e.a.telas.atualizarLegendaGerada(te, s, 150)
+	if envios() != 1 {
+		t.Fatal("4 minutos a mais ainda é pouco para mandar de novo")
+	}
+	for b := 7; b < 11; b++ {
 		e.a.db.Exec(`INSERT INTO blocos_gerados (chave, bloco, palavras) VALUES (?, ?, '[]')`, chave, b)
 	}
 	e.a.telas.atualizarLegendaGerada(te, s, 150)

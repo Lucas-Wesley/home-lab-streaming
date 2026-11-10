@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, inject, onMounted, ref, watch } from 'vue'
 import Assistir from './Assistir.vue'
 import Folha from './Folha.vue'
 import Grade from './Grade.vue'
@@ -10,6 +10,7 @@ import { relogio } from './tempo.js'
 // Início: a busca em tudo (canais, filmes e séries da assinatura e, com o TMDB, os títulos que só há
 // por torrent: S28), o que está pela metade e as novidades.
 const props = defineProps({ busca: { type: String, default: '' } })
+const recado = inject('recado')
 
 const texto = ref(props.busca)
 const resultado = ref(null)
@@ -58,13 +59,26 @@ function abrirContinuar(p) {
   escolhido.value = p
 }
 
+// Tirar some na hora; "Desfazer" guarda de novo o mesmo ponto.
 async function tirarDeContinuar(p) {
+  const lugar = continuar.value.findIndex((c) => c.chave === p.chave)
+  continuar.value = continuar.value.filter((c) => c.chave !== p.chave)
+  escolhido.value = null
   try {
     await api(`/api/progresso/${p.chave}`, { metodo: 'DELETE' })
-    continuar.value = continuar.value.filter((c) => c.chave !== p.chave)
-    escolhido.value = null
+    recado('Tirado de Continuar assistindo.', false, { rotulo: 'Desfazer', fazer: () => devolver(p, lugar) })
   } catch (e) {
-    erro.value = e.message
+    continuar.value.splice(lugar, 0, p)
+    recado(e.message, true)
+  }
+}
+
+async function devolver(p, lugar) {
+  try {
+    await api(`/api/progresso/${p.chave}`, { metodo: 'PUT', corpo: { posicao: p.posicao, duracao: p.duracao } })
+    continuar.value.splice(Math.min(lugar, continuar.value.length), 0, p)
+  } catch (e) {
+    recado(e.message, true)
   }
 }
 
@@ -113,12 +127,18 @@ onMounted(async () => {
       <section v-if="continuar.length">
         <p class="rotulo">Continuar assistindo</p>
         <ul class="continuar">
-          <li v-for="p in continuar" :key="p.chave">
-            <button class="pela-metade" @click="abrirContinuar(p)">
-              <span class="capa"><img v-if="p.capa" :src="p.capa" alt="" loading="lazy" referrerpolicy="no-referrer" /></span>
-              <span class="barra"><span :style="{ width: `${Math.min(100, (p.posicao / (p.duracao || 1)) * 100)}%` }" /></span>
+          <li v-for="p in continuar" :key="p.chave" class="pela-metade">
+            <button class="abrir" @click="abrirContinuar(p)">
+              <span class="capa">
+                <img v-if="p.capa" :src="p.capa" alt="" loading="lazy" referrerpolicy="no-referrer" />
+                <Icone v-else nome="filmes" />
+                <span class="barra"><span :style="{ width: `${Math.min(100, (p.posicao / (p.duracao || 1)) * 100)}%` }" /></span>
+              </span>
               <span class="nome">{{ p.titulo }}</span>
               <span class="meta">{{ p.subtitulo }}</span>
+            </button>
+            <button class="tirar-rapido" title="Tirar de Continuar assistindo" :aria-label="`Tirar ${p.titulo} de Continuar assistindo`" @click="tirarDeContinuar(p)">
+              <Icone nome="lixeira" />
             </button>
           </li>
         </ul>
@@ -178,7 +198,7 @@ onMounted(async () => {
 
 .continuar {
   display: grid;
-  grid-auto-columns: 220px;
+  grid-auto-columns: min(232px, 64vw);
   grid-auto-flow: column;
   gap: 14px;
   margin: 0;
@@ -186,70 +206,121 @@ onMounted(async () => {
   overflow-x: auto;
   list-style: none;
   scroll-snap-type: x proximity;
-}
-
-.continuar li {
-  scroll-snap-align: start;
+  scrollbar-width: thin;
 }
 
 .pela-metade {
+  position: relative;
+  min-width: 0;
+  scroll-snap-align: start;
+}
+
+.abrir {
   display: grid;
-  gap: 5px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 3px;
   width: 100%;
   padding: 0;
   border: 0;
   background: none;
+  color: inherit;
   text-align: left;
   cursor: pointer;
 }
 
-.pela-metade .capa {
-  display: block;
+.capa {
+  position: relative;
+  display: grid;
+  place-items: center;
   aspect-ratio: 16 / 9;
+  margin-bottom: 5px;
   overflow: hidden;
   border-radius: var(--raio-p);
   background: var(--superficie);
+  color: var(--texto-fraco);
 }
 
-.pela-metade img {
+.capa img {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
 
 .barra {
-  display: block;
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
   height: 3px;
-  margin-top: -9px;
-  margin-inline: 8px;
-  border-radius: 2px;
-  background: rgb(255 255 255 / 45%);
-  position: relative;
+  background: rgb(255 255 255 / 30%);
 }
 
 .barra span {
   display: block;
   height: 100%;
-  border-radius: 2px;
   background: var(--marca);
 }
 
-.pela-metade .nome {
-  margin-top: 4px;
+.nome {
+  display: -webkit-box;
+  overflow: hidden;
   font-size: 0.9rem;
   font-weight: 600;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
-.pela-metade:hover .nome {
+.abrir:hover .nome {
   color: var(--marca);
 }
 
-.pela-metade .meta {
+.meta {
   overflow: hidden;
   color: var(--texto-suave);
   font-size: 0.78rem;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* A lixeira aparece ao passar o mouse; no celular fica sempre, discreta, no canto da imagem. */
+.tirar-rapido {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgb(0 0 0 / 55%);
+  color: #fff;
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+.tirar-rapido svg {
+  width: 17px;
+  height: 17px;
+}
+
+.pela-metade:hover .tirar-rapido,
+.tirar-rapido:focus-visible {
+  opacity: 1;
+}
+
+.tirar-rapido:hover {
+  background: var(--vermelho);
+}
+
+@media (hover: none) {
+  .tirar-rapido {
+    opacity: 0.8;
+  }
 }
 
 .detalhe {

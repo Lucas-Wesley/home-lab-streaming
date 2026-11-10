@@ -19,7 +19,7 @@ import { api } from './api.js'
 // Rotas no hash, como nas outras apps: o "voltar" do celular volta para a tela anterior.
 // O que vem depois de "?" no hash são opções da tela (título e posição no player).
 const hash = ref(location.hash)
-const recado = ref(null) // { texto, erro } — aviso rápido
+const recado = ref(null) // { texto, erro, acao } — aviso rápido; acao: { rotulo, fazer }, como "Desfazer"
 const versao = ref('')
 
 const rota = computed(() => {
@@ -61,10 +61,16 @@ function aoMudarHash() {
 }
 
 let tempoDoRecado
-function mostrarRecado(texto, erro = false) {
-  recado.value = { texto, erro }
+function mostrarRecado(texto, erro = false, acao = null) {
+  recado.value = { texto, erro, acao }
   clearTimeout(tempoDoRecado)
-  tempoDoRecado = setTimeout(() => (recado.value = null), 4000)
+  tempoDoRecado = setTimeout(() => (recado.value = null), acao ? 6000 : 4000)
+}
+
+function fazerDoRecado() {
+  const acao = recado.value?.acao
+  recado.value = null
+  acao?.fazer()
 }
 provide('recado', mostrarRecado)
 
@@ -126,7 +132,10 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', aoMudarHash))
     <BarraDoControle v-if="!telaCheia" />
 
     <Transition name="recado">
-      <div v-if="recado" class="recado vidro" :class="{ erro: recado.erro }" role="status">{{ recado.texto }}</div>
+      <div v-if="recado" class="recado vidro" :class="{ erro: recado.erro }" role="status">
+        {{ recado.texto }}
+        <button v-if="recado.acao" class="acao-do-recado" @click="fazerDoRecado">{{ recado.acao.rotulo }}</button>
+      </div>
     </Transition>
   </div>
 </template>
@@ -248,6 +257,17 @@ nav {
 
 .recado.erro {
   color: var(--vermelho);
+}
+
+.acao-do-recado {
+  margin-left: 12px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--marca);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
 }
 
 .recado-enter-active,

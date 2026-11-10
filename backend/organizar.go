@@ -223,7 +223,8 @@ func (a *app) handleTorrentsDoTitulo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	temporada, _ := strconv.Atoi(r.URL.Query().Get("temporada"))
-	buscas := buscasDoTitulo(t, temporada)
+	episodio, _ := strconv.Atoi(r.URL.Query().Get("episodio"))
+	buscas := buscasDoTitulo(t, temporada, episodio)
 	resultados, err := a.procurarVarias(r.Context(), c, buscas, t.Tipo)
 	if err != nil {
 		erroJSON(w, http.StatusBadGateway, err.Error())
@@ -235,8 +236,9 @@ func (a *app) handleTorrentsDoTitulo(w http.ResponseWriter, r *http.Request) {
 // buscasDoTitulo: os indexadores procuram por palavras soltas, e um nome curto ("Dark") traz
 // "Dark Matter", "The Dark"… Por isso vão várias buscas juntas, cada uma com algo que costuma estar
 // no nome dos lançamentos do título: o ano, "complete" ou a temporada (que a página pede ao abrir
-// a temporada). O filtro de lerLancamento tira o que é de outro título.
-func buscasDoTitulo(t tituloDoTMDB, temporada int) []string {
+// a temporada). O filtro de lerLancamento tira o que é de outro título. O episódio ("Nome S02E05")
+// é pedido ao abrir um episódio com poucas opções avulsas: a busca da temporada traz mais pacotes.
+func buscasDoTitulo(t tituloDoTMDB, temporada, episodio int) []string {
 	var buscas []string
 	vistos := map[string]bool{}
 	juntar := func(q string) {
@@ -251,6 +253,8 @@ func buscasDoTitulo(t tituloDoTMDB, temporada int) []string {
 			juntar(n + " " + t.Ano)
 		case t.Tipo == "filme":
 			juntar(n)
+		case temporada > 0 && episodio > 0:
+			juntar(fmt.Sprintf("%s S%02dE%02d", n, temporada, episodio))
 		case temporada > 0:
 			juntar(fmt.Sprintf("%s S%02d", n, temporada))
 			juntar(fmt.Sprintf("%s season %d", n, temporada))

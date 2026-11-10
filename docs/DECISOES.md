@@ -1,7 +1,7 @@
 # Streaming — Decisões
 
 > Central de streaming do Lucas: canais ao vivo, filmes e séries de uma assinatura IPTV, num PWA para o celular e o
-> computador, com o celular servindo também de **controle remoto da TV e do projetor**. Registro até **09/11/2026**.
+> computador, com o celular servindo também de **controle remoto da TV e do projetor**. Registro até **10/11/2026**.
 > Parte do ecossistema: arquitetura e contrato comum ficam no repo **Hub**
 > ([`hub-home-lab-web`](https://github.com/Lucas-Wesley/hub-home-lab-web), `docs/`).
 
@@ -25,8 +25,10 @@
 - **Verificação das opções** (S23): duração × TMDB, formatos, impressão digital e quadros; as 3 melhores são verificadas
   sozinhas, ao mesmo tempo, e o botão de assistir avisa quando o aparelho não toca o som ou a imagem.
 - **Página do título = tela de assistir** (S20, S28): a assinatura primeiro, depois as versões de torrent do **Prowlarr**
-  organizadas (versões do filme, ou temporadas com o pacote completo e cada episódio), todas com **Assistir** e
-  **Baixar**. A folha de assistir mostra de onde vem, o **idioma de cada áudio** (o Whisper reconhece quando o arquivo
+  organizadas (versões do filme; na série, só os episódios, com imagem e resumo: os pacotes da temporada ou da série
+  ficam de fora, e abrir um episódio com poucas versões busca por ele, "Nome S02E05"), todas com **Assistir** e
+  **Baixar**. **Também em** (S30): Netflix, HBO Max, Apple TV, Disney+ e Prime Video, quando têm o título no Brasil,
+  com o link que abre o título no app de cada um. A folha de assistir mostra de onde vem, o **idioma de cada áudio** (o Whisper reconhece quando o arquivo
   não diz) e o vídeo.
 - **Downloads** (S28): da assinatura (baixa com a conexão livre, para quando alguém assiste e continua depois) e dos
   torrents; baixado, toca do disco sem ocupar a assinatura.
@@ -36,7 +38,9 @@
   cresce à frente de quem assiste; o Whisper e o Claude revisam (double check) um pouco adiante. Na assinatura, o
   servidor puxa antes só o áudio (~17 s por episódio) e o vídeo para e volta sozinho.
 - **Favoritos** (S15): canais, filmes e séries, numa aba própria.
-- **Continuar assistindo**, com o ponto em que parou, venha do player ou da tela (S22), e a opção de tirar da lista.
+- **Continuar assistindo**, com o ponto em que parou, venha do player ou da tela (S22): até 12 itens, um por título
+  (a assinatura e os torrents do mesmo título juntos, pelo TMDB ou pelo nome limpo), com o nome e a imagem do TMDB e
+  uma lixeira no canto da imagem (no mouse, aparece ao passar; no celular, fica discreta), com "Desfazer".
 - **Telas** (S8): a TV e o projetor são achados na rede; **Assistir na tela** manda o vídeo do mesmo ponto, e o
   celular vira controle (pausar, avançar, voltar, ir para um ponto, volume e parar). Uma barra no pé da tela leva ao
   controle enquanto algo toca.
@@ -89,6 +93,7 @@
 | S26 | **Whisper compartilhado** (`homelab/whisper`, speaches com faster-whisper "small" int8, só processador, na rede `proxy` em `http://whisper:8000`; o modelo sai da memória após 10 min). No Streaming, `WHISPER_URL`: 3. sem referência, ouve 3 trechos de 90 s e casa as **palavras** com as da legenda (mesmo idioma; votação entre os pares, ≥ 4 falas concordando); e, na verificação em dúvida, ouve 2 min e compara com a legenda do título (confirma ou desmente; diz o idioma do áudio). Vídeos da assinatura ficam de fora: ouvir o provedor ocupa a única conexão (S5) | No servidor (i7-8700T), 90 s de áudio levam 11–36 s. Com áudio real, 98% das falas casaram e o atraso saiu com 0,3 s de diferença; a legenda em outro idioma casou 0%. Os trechos curtos com ffsubsync ou detecção de silêncio erraram (descartados). |
 | S27 | **Claude automático** (Claude Code, `claude -p`, modelo Haiku, só leitura dos quadros; login por `CLAUDE_CODE_OAUTH_TOKEN` no `.env`, como no Acervo): 1) legenda em **outro idioma**: casa pelo sentido as falas que o Whisper ouviu com as da legenda, e o atraso sai dos pares; 2) **parecer** quando a verificação termina "suspeito" ou "indefinido": recebe título, duração, nome, formatos, falas ouvidas e olha os 3 quadros; pode confirmar (indefinido → ok) ou desmentir (→ errado), e a explicação aparece na opção. Sem Claude ou sem login, essas etapas são puladas. Nos testes, `testdata/claude-falso` | Testado em 09/11/2026: legenda em português × áudio em inglês ajustada em +38,5 s em 16 s; parecer sobre a Odisseia "BluRray" (é o filme, imagem limpa, provável vazamento antes do digital). |
 | S29 | **Legenda gerada pelo áudio**: o **Parakeet** (NVIDIA, serviço compartilhado do homelab em `parakeet/`, API da OpenAI) transcreve de minuto em minuto (`blocos_gerados`, 60 s + 3 s de sobra; a palavra repetida na emenda sai), começando pelo minuto em que o Lucas está (pelo `progresso`) e voltando ao começo no fim; cada minuto pronto reescreve o SRT (`gerada-{tipo}-{id}`), que vira a legenda escolhida. Inglês vai para o **v2**, os outros 24 idiomas europeus para o **v3**; o idioma vem do arquivo ou do **Whisper** (30 s), que também transcreve os idiomas fora do Parakeet. **Double check**: com 5 min de folga à frente de quem assiste, o Whisper ouve de novo e o **Claude** junta as duas transcrições linha a linha (mesmos tempos, mesmo número de linhas, senão fica o texto do Parakeet), começando 2 min adiante. **Assinatura**: puxa só a faixa de áudio (`-c:a copy`, `data/audio`) com a conexão livre; o player para e volta sozinho (`geracao.puxar`), e a tela para e volta pelo servidor (`liberar`). **Telas**: recebem a legenda junto com o vídeo; quando a que têm está acabando e já há mais pronta, o servidor manda o vídeo de novo do mesmo ponto | Pedido do Lucas (09–10/11/2026). Medido no servidor (10 min do piloto de Breaking Bad): Parakeet v2 ~95 s, v3 ~100 s (o v3 pulou mais frases em inglês), Whisper small 109 s. Juntando Parakeet e Whisper com o Claude, o erro contra o large-v3-turbo caiu de 19% (Parakeet) e 12% (Whisper) para 9% num minuto, e de 21%/23% para 19% no outro. Episódio real da assinatura: áudio puxado em 17 s, primeira legenda em 28 s, depois ~6 s por minuto. A revisão é mais lenta (~30 s por minuto com o processador dividido). |
+| S30 | **Também em: os outros streamings** (Netflix, HBO Max, Apple TV, Disney+, Prime Video). Tocar o vídeo deles no app não dá (DRM, sem API pública desde 2014, termos de uso). A lista vem do TMDB (`/watch/providers`, Brasil, dados da JustWatch, citada no pé da página), um item por serviço (assinatura antes de aluguel e compra; os "Amazon Channel" ficam de fora). O endereço do título em cada serviço sai da página "onde assistir" do TMDB (links da JustWatch, guardados por um dia); sem ele, o link é a página do TMDB. No celular, esses endereços abrem o app do serviço | Pedido do Lucas (10/11/2026). Testado com Breaking Bad (Netflix), Duna 2 (HBO Max, Apple TV e Prime para alugar), The Bear (Disney+), Ruptura (Apple TV) e Oppenheimer: todos com link direto. Abrir o título na TV Samsung pelo app dela fica para o S9 (API local). |
 | S28 | **Assinatura e torrent como uma coisa só**: 1) **busca do Início** junta o catálogo e o TMDB (`busca.go`): um título do TMDB que está na assinatura aparece uma vez (as cópias "Duna" e "Duna [L]" entram nele, pelo nome exato e ano, ou pelo nome com subtítulo e o mesmo ano); fora da assinatura, só com capa e ≥ 20 votos ou popularidade ≥ 5. 2) **página do título** (`#/titulo/{tipo}/{id}`) é a tela final: a assinatura primeiro, depois os torrents; "Assistir" num torrent prepara o torrent por trás e abre o vídeo certo (`POST /api/opcoes/preparar`); as páginas de filme e série da assinatura levam a ela quando o título é conhecido (`assinatura_tmdb`: o filme traz o código do TMDB nos detalhes; a série, pelo nome). 3) **formatos na folha de assistir** (`GET /api/formatos`), lidos na hora e guardados; idioma desconhecido ("unk") é reconhecido pelo Whisper em 30 s por faixa. 4) **baixar da assinatura** (`downloads_da_assinatura`, um por vez, retoma por Range). 5) a conexão tem um uso **por trás** (`entrarPorTras`): o servidor só a usa livre, e qualquer pedido de verdade corta o trabalho e devolve a conexão a quem a tinha. Torrents e vídeos baixados não tomam a conexão ao tocar | Pedido do Lucas (09/11/2026): "a mesma experiência para os dois". Sem classificação automática de qual é melhor: a assinatura vem primeiro, e a escolha é dele, com o idioma do áudio à vista. Testado com o catálogo real: Duna, Oppenheimer, 2001 e Breaking Bad juntos; o 2001 da assinatura é dublado (reconhecido em 18 s). |
 | S12 | Cor do app: **âmbar** (`#b45309` / `#f5a65b`) | Não se confunde com o azul, o verde e o violeta dos outros apps, nem com o vermelho de erro. |
 
@@ -110,6 +115,13 @@ O projetor também anuncia AirPlay (porta 7001), mas recusa tocar um link por el
 - **Legenda gerada** (S29): conferir no uso o tempo da revisão (Whisper + Claude) e se vale manter ligada
   (`LEGENDA_REVISAO=0` desliga). O projetor não aceita legenda externa (ver abaixo), então a gerada só aparece na TV
   e no aparelho.
+- **Imagem que apagava na TV** (10/11/2026): duas causas achadas e corrigidas. 1) A Samsung só responde ao "ir para"
+  quando já tem o vídeo do novo ponto (com torrent, mais de 8 s); o servidor achava que ela tinha sumido, procurava de
+  novo e repetia o comando, e a TV recarregava duas vezes. Agora o Seek espera 12 s e, se a TV recebeu o pedido, não
+  repete (`errTelaDemorou`). 2) Com a legenda gerada, o vídeo era mandado de novo a cada minuto ouvido (4 vezes em 3
+  min); agora só quando há 8 min prontos à frente (ou a legenda acabou), uns 2 envios por episódio. Tocando direto,
+  com a geração rodando junto, a TV andou 209 s em 210 s, sem pedir o vídeo de novo. A TV guarda pouco à frente (puxa
+  no ritmo do vídeo): o torrent lê 32 MB adiante para ela.
 - Teste `TestTelaQueMudouDePorta` acusou uma corrida (race) 1 vez em 4 rodadas da suíte inteira; não se repetiu
   sozinho em 30 rodadas.
 - **Sincronia dos vídeos da assinatura**: só manual, porque ouvir o provedor ocupa a única conexão. Dá para ouvir

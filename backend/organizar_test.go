@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -98,7 +99,14 @@ func TestOrganizarFilmeEAnime(t *testing.T) {
 // tmdbFalso responde como o TMDB para Breaking Bad (série 1396).
 func tmdbFalso(t *testing.T) *httptest.Server {
 	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// A página "onde assistir" do site (sem chave), com os links da JustWatch.
+		if r.URL.Path == "/tv/1396-breaking-bad/watch" {
+			fmt.Fprint(w, `<a class="relative" href="https://click.justwatch.com/a?cx=x&amp;r=https%3A%2F%2Fwww.netflix.com%2Ftitle%2F70143836&amp;uct_country=br" title="Assista Breaking Bad na Netflix" target="_blank">
+				<a class="relative" href="https://click.justwatch.com/a?r=https%3A%2F%2Fexemplo.invalid%2Fc%3Fu%3Dhttps%253A%252F%252Fwww.disneyplus.com%252Fbrowse%252Fbb" title="Assista Breaking Bad no Disney Plus">`)
+			return
+		}
 		if r.URL.Query().Get("api_key") != "0123456789abcdef0123456789abcdef" {
 			http.Error(w, `{"status_message":"Invalid API key"}`, http.StatusUnauthorized)
 			return
@@ -115,6 +123,11 @@ func tmdbFalso(t *testing.T) *httptest.Server {
 				"seasons":[{"season_number":1,"name":"Temporada 1","episode_count":7}],
 				"external_ids":{"imdb_id":"tt0903747"},
 				"alternative_titles":{"results":[{"title":"ブレイキング・バッド"},{"title":"Breaking Bad: Reazioni collaterali"}]}}`)
+		case "/3/tv/1396/watch/providers":
+			fmt.Fprintf(w, `{"results":{"US":{"flatrate":[{"provider_id":15,"provider_name":"Hulu"}]},"BR":{"link":"%s/tv/1396-breaking-bad/watch?locale=BR",
+				"flatrate":[{"provider_id":8,"provider_name":"Netflix","logo_path":"/n.jpg"},{"provider_id":1796,"provider_name":"Netflix Standard with Ads"},
+					{"provider_id":337,"provider_name":"Disney Plus"},{"provider_id":1825,"provider_name":"HBO Max Amazon Channel"},{"provider_id":484,"provider_name":"Claro tv+"}],
+				"buy":[{"provider_id":2,"provider_name":"Apple TV Store"},{"provider_id":10,"provider_name":"Amazon Video"}]}}}`, srv.URL)
 		case "/3/tv/1396/season/1":
 			fmt.Fprint(w, `{"episodes":[{"episode_number":1,"name":"Piloto"},{"episode_number":2,"name":"O Gato Está no Saco..."}]}`)
 		default:
@@ -182,5 +195,37 @@ func TestTitulosDoTMDB(t *testing.T) {
 	b, _ := json.Marshal(org)
 	if strings.Contains(string(b), chaveFalsa) {
 		t.Fatal("chave do Prowlarr na resposta")
+	}
+}
+
+// Onde mais assistir (S30): só os serviços principais, no Brasil, um por serviço (a assinatura antes
+// da compra), com o endereço do título no serviço quando a página do TMDB o tem.
+func TestOndeAssistir(t *testing.T) {
+	e := novoAmbiente(t)
+	t.Setenv("TMDB_URL", tmdbFalso(t).URL)
+	e.pedir(t, "PUT", "/api/tmdb", map[string]string{"chave": "0123456789abcdef0123456789abcdef"})
+	var lista []ondeAssistir
+	e.json(t, "/api/titulos/serie/1396/onde", &lista)
+	var veio []string
+	for _, o := range lista {
+		veio = append(veio, fmt.Sprintf("%s|%s|%v|%s", o.Servico, o.Como, o.Direto, regexp.MustCompile(`^http://127\.0\.0\.1:\d+`).ReplaceAllString(o.Link, "")))
+	}
+	pagina := "/tv/1396-breaking-bad/watch?locale=BR"
+	quer := []string{
+		"Netflix|assinatura|true|https://www.netflix.com/title/70143836",
+		"Apple TV|compra|false|" + pagina,
+		"Disney+|assinatura|true|https://www.disneyplus.com/browse/bb",
+		"Prime Video|compra|false|" + pagina,
+	}
+	if len(veio) != len(quer) {
+		t.Fatalf("veio:\n%s", strings.Join(veio, "\n"))
+	}
+	for i := range quer {
+		if veio[i] != quer[i] {
+			t.Fatalf("veio:\n%s", strings.Join(veio, "\n"))
+		}
+	}
+	if lista[0].Logo != imagensDoTMDB+"w92/n.jpg" {
+		t.Fatalf("logo: %q", lista[0].Logo)
 	}
 }

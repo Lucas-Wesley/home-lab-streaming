@@ -93,7 +93,7 @@ async function legendaEscolhida(l) {
 }
 
 // Legenda gerada pelo áudio (S29). Na assinatura, o servidor para a tela, puxa o áudio e manda o
-// vídeo de volta sozinho. Fora dela, espera o primeiro minuto ficar pronto e manda de novo; depois,
+// vídeo de volta sozinho. Fora dela, espera 3 min ficarem prontos e manda de novo; depois,
 // o servidor atualiza a tela quando a legenda que ela tem está acabando.
 async function gerada(l) {
   if (l.geracao.puxar) {
@@ -105,7 +105,7 @@ async function gerada(l) {
     await new Promise((ok) => setTimeout(ok, 3000))
     const g = (await api(`/api/legendas/${sessao.value?.chave}`).catch(() => null))?.escolhida?.geracao
     if (!g || g.estado === 'erro' || g.estado === 'parada') return
-    if (g.ate > (estado.value?.posicao || 0) + 50 || g.estado === 'pronta') break
+    if (g.ate > (estado.value?.posicao || 0) + 180 || g.estado === 'pronta') break
   }
   reenviar('Legenda gerada na tela: o vídeo recomeça do mesmo ponto.')
 }

@@ -22,6 +22,8 @@ type tvFalsa struct {
 	estado  string
 	posicao string
 	srv     *httptest.Server
+	// Como a Samsung com torrent: o Seek só responde quando o vídeo do novo ponto chegou.
+	demoraDoSeek time.Duration
 }
 
 func novaTVFalsa(t *testing.T) *tvFalsa {
@@ -40,6 +42,9 @@ func novaTVFalsa(t *testing.T) *tvFalsa {
 		acao := strings.Trim(r.Header.Get("SOAPACTION"), `"`)
 		acao = acao[strings.LastIndex(acao, "#")+1:]
 		b, _ := io.ReadAll(r.Body)
+		if acao == "Seek" {
+			time.Sleep(tv.demoraDoSeek)
+		}
 		tv.mu.Lock()
 		defer tv.mu.Unlock()
 		tv.acoes = append(tv.acoes, acao)
@@ -99,6 +104,36 @@ func registrarTV(t *testing.T, e *ambiente, tv *tvFalsa) tela {
 		t.Fatal(err)
 	}
 	return te
+}
+
+func (tv *tvFalsa) quantas(acao string) int {
+	tv.mu.Lock()
+	defer tv.mu.Unlock()
+	n := 0
+	for _, a := range tv.acoes {
+		if a == acao {
+			n++
+		}
+	}
+	return n
+}
+
+// A TV que demora a responder ao Seek recebeu o pedido: o servidor não procura a tela de novo nem
+// repete o Seek (a imagem apagaria duas vezes), e o celular não vê erro.
+func TestIrParaNaTelaQueDemora(t *testing.T) {
+	e := novoAmbiente(t)
+	tv := novaTVFalsa(t)
+	te := registrarTV(t, e, tv)
+	tv.demoraDoSeek = 300 * time.Millisecond
+	e.a.telas.httpDoSeek = &http.Client{Timeout: 100 * time.Millisecond}
+
+	if status, corpo := e.pedir(t, "POST", "/api/telas/"+url.PathEscape(te.ID)+"/comando", map[string]any{"comando": "ir", "valor": 600}); status/100 != 2 {
+		t.Fatalf("%d %s", status, corpo)
+	}
+	time.Sleep(400 * time.Millisecond)
+	if n := tv.quantas("Seek"); n != 1 {
+		t.Fatalf("Seek mandado %d vezes", n)
+	}
 }
 
 func TestDescricaoDaTela(t *testing.T) {

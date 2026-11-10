@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -24,51 +25,78 @@ type pedidoDeBusca struct {
 }
 
 // locaisSSDP manda a busca aos alvos e junta as descrições que as respostas indicam. Os primeiros
-// alvos (o grupo e as telas conhecidas) vão 3 vezes; a varredura da rede, uma: repetida, ela fazia a
-// TV ou o projetor sumir de uma busca para outra.
+// alvos (o grupo e as telas conhecidas) vão 3 vezes; a varredura da rede vai uma vez e por outro
+// socket: no Linux, os pacotes à espera do ARP ocupam o buffer do socket, e a busca ao grupo
+// atrasava até perder a TV ou o projetor.
 func locaisSSDP(ctx context.Context, alvos []string, repetir int, espera time.Duration, primeira bool) ([]string, error) {
 	if repetir <= 0 || repetir > len(alvos) {
 		repetir = len(alvos)
 	}
-	conn, err := net.ListenUDP("udp4", &net.UDPAddr{})
-	if err != nil {
-		return nil, err
-	}
-	defer conn.Close()
-
 	fim := time.Now().Add(espera)
 	if d, ok := ctx.Deadline(); ok && d.Before(fim) {
 		fim = d
 	}
-	var locais []string
-	vistos := map[string]bool{}
-	buf := make([]byte, 8192)
-	for envio := 0; time.Now().Before(fim) && ctx.Err() == nil; envio++ {
-		if envio < 3 {
-			lote := alvos
-			if envio > 0 {
-				lote = alvos[:repetir]
-			}
-			for _, ip := range lote {
-				_, _ = conn.WriteToUDP([]byte(buscaSSDP), &net.UDPAddr{IP: net.ParseIP(ip), Port: portaSSDP})
-			}
-		}
-		_ = conn.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
-		n, _, err := conn.ReadFromUDP(buf)
+	ctx, cancel := context.WithDeadline(ctx, fim)
+	defer cancel()
+
+	var (
+		mu     sync.Mutex
+		locais []string
+		vistos = map[string]bool{}
+		wg     sync.WaitGroup
+		erro   error
+	)
+	ouvir := func(lote []string, rodadas int) {
+		defer wg.Done()
+		conn, err := net.ListenUDP("udp4", &net.UDPAddr{})
 		if err != nil {
-			continue
+			mu.Lock()
+			erro = err
+			mu.Unlock()
+			return
 		}
-		for _, linha := range strings.Split(string(buf[:n]), "\r\n") {
-			if k, v, ok := strings.Cut(linha, ":"); ok && strings.EqualFold(strings.TrimSpace(k), "location") {
-				if v = strings.TrimSpace(v); !vistos[v] {
-					vistos[v] = true
-					locais = append(locais, v)
+		defer conn.Close()
+		buf := make([]byte, 8192)
+		for envio := 0; ctx.Err() == nil; envio++ {
+			if envio < rodadas {
+				for _, ip := range lote {
+					_, _ = conn.WriteToUDP([]byte(buscaSSDP), &net.UDPAddr{IP: net.ParseIP(ip), Port: portaSSDP})
+				}
+			}
+			_ = conn.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
+			n, _, err := conn.ReadFromUDP(buf)
+			if err != nil {
+				continue
+			}
+			for _, linha := range strings.Split(string(buf[:n]), "\r\n") {
+				if k, v, ok := strings.Cut(linha, ":"); ok && strings.EqualFold(strings.TrimSpace(k), "location") {
+					mu.Lock()
+					if v = strings.TrimSpace(v); !vistos[v] {
+						vistos[v] = true
+						locais = append(locais, v)
+					}
+					mu.Unlock()
+				}
+			}
+			if primeira {
+				mu.Lock()
+				achou := len(locais) > 0
+				mu.Unlock()
+				if achou {
+					cancel()
 				}
 			}
 		}
-		if primeira && len(locais) > 0 {
-			break
-		}
+	}
+	wg.Add(1)
+	go ouvir(alvos[:repetir], 3)
+	if repetir < len(alvos) {
+		wg.Add(1)
+		go ouvir(alvos[repetir:], 1)
+	}
+	wg.Wait()
+	if len(locais) == 0 && erro != nil {
+		return nil, erro
 	}
 	return locais, nil
 }

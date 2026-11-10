@@ -2,7 +2,7 @@ services:
   streaming:
     # O app passa pelo Caddy (HTTPS, porta 8446). A porta das telas fica direto no IP da VM:
     # a TV e o projetor tocam por DLNA, que não aceita o nosso certificado.
-    ports: !reset
+    ports: !override
       - "192.168.1.20:8447:8081"
     environment:
       URL_DAS_TELAS: http://192.168.1.20:8447

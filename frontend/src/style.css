@@ -1,0 +1,348 @@
+/* Tokens do design system comum às apps do homelab (Biblioteca, Acervo, Flashcards, Streaming…).
+   A especificação fica em docs/DESIGN-SYSTEM.md; os valores são os mesmos em todas as apps,
+   menos a cor do app (--marca), que diz em qual delas se está.
+   Neutros frios em quase tudo; a cor do app na ação principal e no item ativo, azul para
+   informação e vermelho para erro e atenção. */
+:root {
+  --fundo: #ffffff;
+  --lateral: #f7f8fa;
+  --item-ativo: #ffffff;
+  --superficie: #f2f3f6;
+  --superficie-forte: #e6e8ec;
+  --texto: #17191e;
+  --texto-suave: #5c6270;
+  --texto-fraco: #858b96;
+  --linha: rgb(23 25 30 / 9%);
+  --linha-forte: rgb(23 25 30 / 16%);
+  --vidro: rgb(255 255 255 / 78%);
+  --vidro-borda: rgb(255 255 255 / 60%);
+  --sombra: 0 1px 2px rgb(23 25 30 / 5%), 0 8px 24px rgb(23 25 30 / 9%);
+  --destaque: #17191e;
+  --destaque-texto: #ffffff;
+
+  /* Cor do app: Streaming. */
+  --marca: #b45309;
+  --marca-fundo: #fdf0e1;
+  --marca-texto: #ffffff;
+
+  --azul: #2459c7;
+  --azul-fundo: #e8effc;
+  --vermelho: #cc3340;
+  --vermelho-fundo: #fdecee;
+  --verde: #15803d;
+
+  /* Papéis, a partir das cores acima. */
+  --link: var(--marca);
+  --perigo: var(--vermelho);
+  --perigo-fundo: var(--vermelho-fundo);
+  --aviso: var(--vermelho);
+  --aviso-fundo: var(--vermelho-fundo);
+  --ok: var(--azul);
+  --ok-fundo: var(--azul-fundo);
+  --mais: var(--azul-fundo);
+  --menos: var(--vermelho-fundo);
+
+  --raio-p: 8px;
+  --raio: 12px;
+  --raio-g: 18px;
+  --blur: blur(20px) saturate(1.6);
+  --interface: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', system-ui, Roboto, 'Segoe UI', sans-serif;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fundo: #121418;
+    --lateral: #16181c;
+    --item-ativo: #23262c;
+    --superficie: #1c1f24;
+    --superficie-forte: #282c32;
+    --texto: #e9eaed;
+    --texto-suave: #a2a7b0;
+    --texto-fraco: #737983;
+    --linha: rgb(255 255 255 / 8%);
+    --linha-forte: rgb(255 255 255 / 15%);
+    --vidro: rgb(18 20 24 / 72%);
+    --vidro-borda: rgb(255 255 255 / 6%);
+    --sombra: 0 1px 2px rgb(0 0 0 / 30%), 0 8px 24px rgb(0 0 0 / 40%);
+    --destaque: #e9eaed;
+    --destaque-texto: #121418;
+    --marca: #f5a65b;
+    --marca-fundo: #3a2814;
+    --marca-texto: #121418;
+    --azul: #8fb0f5;
+    --azul-fundo: #1a2540;
+    --vermelho: #f07a83;
+    --vermelho-fundo: #3a1d21;
+    --verde: #22a355;
+    color-scheme: dark;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--interface);
+  font-size: 15px;
+  color: var(--texto);
+  background: var(--fundo);
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+a {
+  color: var(--link);
+}
+
+:focus-visible {
+  outline: 2px solid var(--marca);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--marca) 20%, transparent);
+}
+
+/* ---------- Peças comuns ---------- */
+
+/* Vidro: barras e painéis que flutuam sobre o texto. */
+.vidro {
+  background: var(--vidro);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+}
+
+.botao {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--linha-forte);
+  border-radius: var(--raio-p);
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.87rem;
+  font-weight: 500;
+  white-space: nowrap;
+  text-decoration: none;
+  color: var(--texto);
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.botao:hover {
+  background: var(--superficie);
+}
+
+.botao:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.botao.principal {
+  border-color: var(--marca);
+  background: var(--marca);
+  color: var(--marca-texto);
+}
+
+.botao.principal:hover {
+  opacity: 0.88;
+}
+
+.botao.perigo {
+  color: var(--perigo);
+}
+
+.botao.icone {
+  width: 34px;
+  min-height: 34px;
+  padding: 0;
+  justify-content: center;
+  border-color: transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--texto-suave);
+}
+
+.botao.icone:hover {
+  background: var(--superficie);
+  color: var(--texto);
+}
+
+/* No toque, a área do botão cresce sem mudar o desenho. */
+@media (pointer: coarse) {
+  .botao {
+    min-height: 36px;
+  }
+
+  .botao.icone {
+    width: 40px;
+    min-height: 40px;
+  }
+}
+
+.campo {
+  width: 100%;
+  min-height: 38px;
+  padding: 7px 12px;
+  border: 1px solid var(--linha-forte);
+  border-radius: var(--raio-p);
+  background: var(--fundo);
+  transition: border-color 0.15s ease;
+}
+
+.campo:focus {
+  border-color: var(--marca);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--marca) 18%, transparent);
+  outline: none;
+}
+
+.chip {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--superficie-forte);
+  color: var(--texto-suave);
+  font-size: 0.75rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.chip.erro {
+  background: var(--vermelho-fundo);
+  color: var(--vermelho);
+}
+
+.chip.ok,
+.chip.andando {
+  background: var(--azul-fundo);
+  color: var(--azul);
+}
+
+/* Filtros e escolhas: pílulas sem borda; a ativa ganha fundo e negrito. */
+.pilula {
+  min-height: 30px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--texto-suave);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.pilula:hover {
+  color: var(--texto);
+}
+
+.pilula.ativa {
+  background: var(--superficie-forte);
+  color: var(--texto);
+  font-weight: 600;
+}
+
+.aviso {
+  padding: 10px 14px;
+  border-radius: var(--raio);
+  background: var(--superficie);
+  color: var(--texto);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.aviso.erro {
+  background: var(--vermelho-fundo);
+  color: var(--vermelho);
+}
+
+.aviso.ok {
+  background: var(--azul-fundo);
+  color: var(--azul);
+}
+
+.suave {
+  color: var(--texto-suave);
+}
+
+.pagina {
+  --margem: 20px;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 36px var(--margem) 96px;
+}
+
+.pagina h1 {
+  margin: 0 0 20px;
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: -0.022em;
+}
+
+/* Rótulo acima de grupos: "Temas", "Em andamento"… Em caixa normal, como um subtítulo. */
+.rotulo {
+  margin: 28px 0 8px;
+  color: var(--texto-suave);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.linha-acoes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.cartao {
+  padding: 14px 16px;
+  border: 1px solid var(--linha);
+  border-radius: var(--raio);
+  background: var(--fundo);
+}
+
+/* Lista: linhas finas separadas por um fio, sem caixas. */
+.lista {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--linha);
+}
+
+.lista > * {
+  border-bottom: 1px solid var(--linha);
+}
+
+.vazio {
+  padding: 48px 16px;
+  text-align: center;
+  color: var(--texto-suave);
+  line-height: 1.55;
+}
+
+@media (max-width: 820px) {
+  .pagina {
+    --margem: 16px;
+    padding: 24px var(--margem) calc(96px + env(safe-area-inset-bottom));
+  }
+
+  .pagina h1 {
+    font-size: 1.55rem;
+  }
+}

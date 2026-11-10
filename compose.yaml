@@ -1,0 +1,26 @@
+name: streaming
+
+services:
+  streaming:
+    build:
+      context: .
+      args:
+        VERSION: ${VERSION:-dev}
+    image: streaming:${VERSION:-dev}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+      # As telas (TV, projetor) buscam o vídeo aqui, por HTTP simples.
+      - "8081:8081"
+    volumes:
+      - ./data:/data
+    # CLAUDE_CODE_OAUTH_TOKEN (gerado com "claude setup-token") fica no .env, fora do Git (S27).
+    env_file:
+      - path: .env
+        required: false
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/api/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s

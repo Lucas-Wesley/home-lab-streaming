@@ -1,0 +1,24 @@
+services:
+  streaming:
+    # O app passa pelo Caddy (HTTPS, porta 8446). A porta das telas fica direto no IP da VM:
+    # a TV e o projetor tocam por DLNA, que não aceita o nosso certificado.
+    ports: !reset
+      - "192.168.1.20:8447:8081"
+    environment:
+      URL_DAS_TELAS: http://192.168.1.20:8447
+      # No container, o servidor não vê a rede de casa: a procura de telas varre esta.
+      REDE_LOCAL: 192.168.1.0/24
+      # Buscador de torrents (S19), na mesma rede do Docker; a chave da API vai em Ajustes.
+      PROWLARR_URL: http://prowlarr:9696
+      # Whisper compartilhado do homelab (S26), na mesma rede do Docker.
+      WHISPER_URL: http://whisper:8000
+      # Parakeet compartilhado do homelab (S29): gera legendas pelo áudio.
+      PARAKEET_URL: http://parakeet:8000
+    volumes:
+      - /srv/data/streaming:/data
+    networks:
+      - proxy
+
+networks:
+  proxy:
+    external: true

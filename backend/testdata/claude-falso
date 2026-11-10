@@ -1,0 +1,5 @@
+#!/bin/sh
+# Claude falso dos testes: guarda os argumentos (um por linha) e responde o que está em
+# $CLAUDE_FALSO_RESPOSTA, como o `claude -p --output-format json` com --json-schema.
+printf '%s\n' "$@" > "$CLAUDE_FALSO_ARGS"
+printf '{"result":"","is_error":false,"structured_output":%s}' "$CLAUDE_FALSO_RESPOSTA"

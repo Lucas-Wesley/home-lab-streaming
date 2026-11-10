@@ -1,0 +1,15 @@
+# Dados locais (banco, listas baixadas e o acesso ao provedor nunca vão para o Git: a repo é pública)
+data/
+.env
+
+node_modules/
+frontend/dist/
+frontend/dev-dist/
+frontend/test-results/
+frontend/playwright-report/
+
+backend/web/dist/*
+!backend/web/dist/.gitkeep
+
+.DS_Store
+backend/home-lab-streaming

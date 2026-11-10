@@ -18,12 +18,18 @@ import (
 
 type pedidoDeBusca struct {
 	Alvos    []string `json:"alvos"`
+	Repetir  int      `json:"repetir"`  // só os primeiros alvos vão de novo nas outras rodadas (0: todos)
 	Espera   float64  `json:"espera"`   // segundos
 	Primeira bool     `json:"primeira"` // devolve na primeira descrição achada
 }
 
-// locaisSSDP manda a busca aos alvos (até 3 vezes) e junta as descrições que as respostas indicam.
-func locaisSSDP(ctx context.Context, alvos []string, espera time.Duration, primeira bool) ([]string, error) {
+// locaisSSDP manda a busca aos alvos e junta as descrições que as respostas indicam. Os primeiros
+// alvos (o grupo e as telas conhecidas) vão 3 vezes; a varredura da rede, uma: repetida, ela fazia a
+// TV ou o projetor sumir de uma busca para outra.
+func locaisSSDP(ctx context.Context, alvos []string, repetir int, espera time.Duration, primeira bool) ([]string, error) {
+	if repetir <= 0 || repetir > len(alvos) {
+		repetir = len(alvos)
+	}
 	conn, err := net.ListenUDP("udp4", &net.UDPAddr{})
 	if err != nil {
 		return nil, err
@@ -39,7 +45,11 @@ func locaisSSDP(ctx context.Context, alvos []string, espera time.Duration, prime
 	buf := make([]byte, 8192)
 	for envio := 0; time.Now().Before(fim) && ctx.Err() == nil; envio++ {
 		if envio < 3 {
-			for _, ip := range alvos {
+			lote := alvos
+			if envio > 0 {
+				lote = alvos[:repetir]
+			}
+			for _, ip := range lote {
 				_, _ = conn.WriteToUDP([]byte(buscaSSDP), &net.UDPAddr{IP: net.ParseIP(ip), Port: portaSSDP})
 			}
 		}
@@ -64,11 +74,11 @@ func locaisSSDP(ctx context.Context, alvos []string, espera time.Duration, prime
 }
 
 // buscarLocais faz a busca aqui mesmo ou pede ao procurador.
-func (c *controleDasTelas) buscarLocais(ctx context.Context, alvos []string, espera time.Duration, primeira bool) ([]string, error) {
+func (c *controleDasTelas) buscarLocais(ctx context.Context, alvos []string, repetir int, espera time.Duration, primeira bool) ([]string, error) {
 	if c.procurador == "" {
-		return locaisSSDP(ctx, alvos, espera, primeira)
+		return locaisSSDP(ctx, alvos, repetir, espera, primeira)
 	}
-	corpo, _ := json.Marshal(pedidoDeBusca{Alvos: alvos, Espera: espera.Seconds(), Primeira: primeira})
+	corpo, _ := json.Marshal(pedidoDeBusca{Alvos: alvos, Repetir: repetir, Espera: espera.Seconds(), Primeira: primeira})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.procurador+"/ssdp", bytes.NewReader(corpo))
 	if err != nil {
 		return nil, err
@@ -97,13 +107,17 @@ func procuradorDeTelas() http.Handler {
 			return
 		}
 		var alvos []string
-		for _, a := range p.Alvos {
+		repetir := 0
+		for i, a := range p.Alvos {
 			if ip := net.ParseIP(a); ip != nil && (ip.IsPrivate() || ip.IsLoopback() || a == "239.255.255.250") {
 				alvos = append(alvos, a)
+				if i < p.Repetir {
+					repetir++ // conta só os aceitos; 0 continua sendo "todos"
+				}
 			}
 		}
 		espera := time.Duration(min(max(p.Espera, 0.5), 5) * float64(time.Second))
-		locais, err := locaisSSDP(r.Context(), alvos, espera, p.Primeira)
+		locais, err := locaisSSDP(r.Context(), alvos, repetir, espera, p.Primeira)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

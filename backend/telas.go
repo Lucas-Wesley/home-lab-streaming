@@ -231,15 +231,16 @@ const buscaSSDP = "M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"s
 // só responde à busca dirigida a ele.
 func (c *controleDasTelas) procurar(ctx context.Context) ([]string, error) {
 	alvos := []string{"239.255.255.250"}
-	for _, rede := range redesLocais() {
-		alvos = append(alvos, enderecosDa(rede)...)
-	}
 	if conhecidas, err := c.a.listaDeTelas(ctx); err == nil {
 		for _, t := range conhecidas {
 			alvos = append(alvos, t.Endereco)
 		}
 	}
-	locais, err := c.buscarLocais(ctx, alvos, 3*time.Second, false)
+	repetir := len(alvos)
+	for _, rede := range redesLocais() {
+		alvos = append(alvos, enderecosDa(rede)...)
+	}
+	locais, err := c.buscarLocais(ctx, alvos, repetir, 3*time.Second, false)
 	if err != nil {
 		return nil, err
 	}
@@ -541,7 +542,7 @@ func (c *controleDasTelas) reencontrar(ctx context.Context, t tela) (tela, error
 
 // perguntarSSDP manda a busca só para um IP e devolve a primeira descrição que ele indicar.
 func (c *controleDasTelas) perguntarSSDP(ctx context.Context, ip string) (string, error) {
-	locais, err := c.buscarLocais(ctx, []string{ip}, 2*time.Second, true)
+	locais, err := c.buscarLocais(ctx, []string{ip}, 0, 2*time.Second, true)
 	if err != nil {
 		return "", err
 	}

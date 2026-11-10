@@ -13,8 +13,13 @@ import (
 // o Whisper ouve de novo cada minuto e o Claude junta as duas transcrições, linha por linha, sem
 // mexer nos tempos. No teste (Breaking Bad), o texto junto errou menos que cada um sozinho.
 
-// Só revisa com pelo menos 5 min de legenda pronta à frente de quem assiste.
-const folgaParaRevisar = 300.0
+// Só revisa com pelo menos 5 min de legenda pronta à frente de quem assiste. Numa tela (TV ou
+// projetor), 12 min: ela só lê a legenda quando o vídeo chega, e cada envio novo apaga a imagem;
+// com mais à frente, os envios ficam espaçados (folgaParaReenviar).
+const (
+	folgaParaRevisar       = 300.0
+	folgaParaRevisarNaTela = 720.0
+)
 
 // Minutos por pedido ao Claude.
 const blocosPorRevisao = 5

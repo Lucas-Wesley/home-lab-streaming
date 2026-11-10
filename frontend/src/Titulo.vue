@@ -375,7 +375,7 @@ onMounted(async () => {
       <p class="suave nota">Dados de filmes e séries: TMDB.<template v-if="outrosServicos.length"> Onde assistir: JustWatch.</template></p>
     </template>
 
-    <Folha v-if="episodioAberto" :titulo="`E${episodioAberto.numero} · ${episodioAberto.nome || `Episódio ${episodioAberto.numero}`}`" @fechar="numeroAberto = 0">
+    <Folha v-if="episodioAberto" larga :titulo="`E${episodioAberto.numero} · ${episodioAberto.nome || `Episódio ${episodioAberto.numero}`}`" @fechar="numeroAberto = 0">
       <p v-if="episodioAberto.sinopse" class="suave sinopse-do-episodio">{{ episodioAberto.sinopse }}</p>
       <ul class="lista">
         <li v-if="episodioAberto.assinatura">

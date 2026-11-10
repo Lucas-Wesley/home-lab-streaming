@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/Lucas-Wesley/home-lab-streaming/provedorfalso"
 )
@@ -46,6 +47,7 @@ func novoAmbiente(t *testing.T) *ambiente {
 		t.Fatal(err)
 	}
 	a.emFundo = func(f func()) { f() }
+	a.telas.esperaDoStop = time.Millisecond
 	telas.Config.Handler = a.servidorDasTelas()
 	telas.Start()
 	t.Cleanup(telas.Close)

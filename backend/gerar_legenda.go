@@ -375,7 +375,11 @@ func (a *app) gerarLegenda(ctx context.Context, chave string) error {
 		feitos := a.blocosFeitos(ctx, chave)
 		b := proximoBloco(feitos, total, posicao)
 		// Com folga à frente de quem assiste (ou tudo ouvido), a vez é da revisão (double check).
-		folga := b < 0 || float64(b)*segundosPorBloco-posicao > folgaParaRevisar || b < int(posicao/segundosPorBloco)
+		minimo := folgaParaRevisar
+		if a.telas.tocandoNumaTela(chave) {
+			minimo = folgaParaRevisarNaTela
+		}
+		folga := b < 0 || float64(b)*segundosPorBloco-posicao > minimo || b < int(posicao/segundosPorBloco)
 		if folga && revisaoDisponivel(modelo) {
 			if grupo := a.blocosParaRevisar(ctx, chave, feitos, total, posicao); len(grupo) > 0 {
 				mudar("gerando", "")
@@ -661,6 +665,8 @@ const (
 	letrasPorLegenda   = 84
 	segundosPorLegenda = 6.0
 	pausaEntreLegendas = 0.6
+	sobraDaFala        = 0.5  // a fala continua na tela depois da última palavra
+	letrasPorSegundo   = 17.0 // velocidade de leitura: o mínimo que a fala fica na tela
 )
 
 func falasDasPalavras(ps []palavraOuvida) []falaGerada {
@@ -701,9 +707,11 @@ func srtDasFalas(falas []falaGerada) string {
 		if strings.TrimSpace(f.Texto) == "" {
 			continue
 		}
-		fim := f.Fim
+		// A fala fica um pouco depois da última palavra e o bastante para ler (como nas legendas
+		// feitas à mão), sem entrar na próxima.
+		fim := math.Max(f.Fim+sobraDaFala, f.Inicio+math.Max(1, float64(len([]rune(f.Texto)))/letrasPorSegundo))
 		if i+1 < len(falas) {
-			fim = math.Min(fim, falas[i+1].Inicio)
+			fim = math.Min(fim, falas[i+1].Inicio-0.05)
 		}
 		n++
 		fmt.Fprintf(&b, "%d\n%s --> %s\n%s\n\n", n, tempoDoSRT(f.Inicio, ","), tempoDoSRT(math.Max(fim, f.Inicio+0.3), ","), emDuasLinhas(strings.TrimSpace(f.Texto)))

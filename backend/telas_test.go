@@ -24,6 +24,8 @@ type tvFalsa struct {
 	srv     *httptest.Server
 	// Como a Samsung com torrent: o Seek só responde quando o vídeo do novo ponto chegou.
 	demoraDoSeek time.Duration
+	// Como o projetor (Whale TV) depois de um Seek: o primeiro Stop só pausa.
+	stopsQuePausam int
 }
 
 func novaTVFalsa(t *testing.T) *tvFalsa {
@@ -57,6 +59,10 @@ func novaTVFalsa(t *testing.T) *tvFalsa {
 			tv.estado = "PAUSED_PLAYBACK"
 		case "Stop":
 			tv.estado = "STOPPED"
+			if tv.stopsQuePausam > 0 {
+				tv.stopsQuePausam--
+				tv.estado = "PAUSED_PLAYBACK"
+			}
 		case "Seek":
 			i := strings.Index(string(b), "<Target>")
 			tv.posicao = string(b)[i+8 : strings.Index(string(b), "</Target>")]
@@ -133,6 +139,21 @@ func TestIrParaNaTelaQueDemora(t *testing.T) {
 	time.Sleep(400 * time.Millisecond)
 	if n := tv.quantas("Seek"); n != 1 {
 		t.Fatalf("Seek mandado %d vezes", n)
+	}
+}
+
+func TestPararATelaQueSoPausa(t *testing.T) {
+	e := novoAmbiente(t)
+	tv := novaTVFalsa(t)
+	te := registrarTV(t, e, tv)
+	tv.estado, tv.stopsQuePausam = "PLAYING", 1
+	if status, corpo := e.pedir(t, "POST", "/api/telas/"+url.PathEscape(te.ID)+"/comando", map[string]any{"comando": "parar"}); status/100 != 2 {
+		t.Fatalf("%d %s", status, corpo)
+	}
+	tv.mu.Lock()
+	defer tv.mu.Unlock()
+	if tv.estado != "STOPPED" {
+		t.Fatalf("a tela ficou %s", tv.estado)
 	}
 }
 

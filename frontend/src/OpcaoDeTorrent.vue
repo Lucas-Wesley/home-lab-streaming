@@ -4,7 +4,7 @@ import Folha from './Folha.vue'
 import FolhaDeAssistir from './FolhaDeAssistir.vue'
 import Icone from './Icone.vue'
 import { api } from './api.js'
-import { noAparelho } from './formatos.js'
+import { noAparelho, nomeDoIdioma } from './formatos.js'
 import { tamanho } from './tamanho.js'
 import { verificacoes, verificar } from './verificacoes.js'
 
@@ -32,20 +32,32 @@ const aviso = computed(() => noAparelho(v.value?.formatos))
 const contexto = computed(() => ({ tmdb: props.tmdb, temporada: props.temporada, episodio: props.episodio }))
 
 const ESTADOS = {
-  verificando: { texto: 'Verificando…', classe: '' },
-  ok: { texto: '✓ Confere', classe: 'ok' },
-  suspeito: { texto: '⚠ Suspeito', classe: 'atencao' },
-  errado: { texto: '✗ Não é este título', classe: 'erro' },
-  indefinido: { texto: '? Sem como comparar', classe: '' },
-  falhou: { texto: 'Não deu para verificar', classe: '' },
+  verificando: { texto: 'Verificando…', classe: 'girando', icone: '…' },
+  ok: { texto: '✓ Confere', classe: 'ok', icone: '✓' },
+  suspeito: { texto: '⚠ Suspeito', classe: 'atencao', icone: '⚠' },
+  errado: { texto: '✗ Não é este título', classe: 'erro', icone: '✗' },
+  indefinido: { texto: '? Sem como comparar', classe: '', icone: '?' },
+  falhou: { texto: 'Não deu para verificar', classe: '', icone: '?' },
 }
 
+// Tudo numa linha só: qualidade, tamanho, semeadores, data e, depois de verificar, o áudio.
 const meta = computed(() => {
   const r = props.r
-  const partes = []
-  if (r.indexador) partes.push(r.indexador)
-  if (r.tamanho > 0) partes.push(tamanho(r.tamanho) + (r.episodios > 1 ? ` (${tamanho(r.tamanho / r.episodios)} por episódio)` : ''))
+  const partes = (r.qualidade || []).map((q) => ({ texto: q }))
+  if (props.mostrarTipo && r.tipo) partes.push({ texto: r.tipo === 'filme' ? 'filme' : 'série' })
+  const idiomas = [...new Set((v.value?.formatos?.audios || []).map((a) => nomeDoIdioma(a.idioma)))]
+  if (idiomas.length) partes.push({ texto: `áudio ${idiomas.join(', ')}`, classe: 'audio' })
+  if (r.tamanho > 0) partes.push({ texto: tamanho(r.tamanho) + (r.episodios > 1 ? ` (${tamanho(r.tamanho / r.episodios)}/ep.)` : '') })
+  partes.push({ texto: `${r.semeadores} sem.`, dica: `${r.semeadores} ${r.semeadores === 1 ? 'semeador' : 'semeadores'}`, classe: r.semeadores < 3 ? 'fraco' : '' })
+  if (quando(r.data)) partes.push({ texto: quando(r.data) })
+  if (r.indexador) partes.push({ texto: r.indexador, classe: 'indexador' })
   return partes
+})
+
+const dicaDaVerificacao = computed(() => {
+  const x = v.value
+  if (!x) return ''
+  return [ESTADOS[x.estado]?.texto || x.estado, x.estado !== 'verificando' && x.resumo, x.parecer && `Claude: ${x.parecer}`].filter(Boolean).join('\n')
 })
 
 async function preparar() {
@@ -96,36 +108,28 @@ function quando(iso) {
 <template>
   <div class="opcao" :class="{ recomendada: r.recomendado }">
     <span class="texto">
-      <span class="titulo"><span class="selo-t" title="Torrent">T</span>{{ r.titulo }}</span>
+      <span class="linha-do-titulo">
+        <span class="selo-t" title="Torrent">T</span>
+        <span class="titulo" :title="r.titulo">{{ r.titulo }}</span>
+      </span>
       <span class="meta">
-        <template v-for="p in meta" :key="p">{{ p }} · </template>
-        <span :class="{ fraco: r.semeadores < 3 }">{{ r.semeadores }} {{ r.semeadores === 1 ? 'semeador' : 'semeadores' }}</span><template v-if="quando(r.data)"> · {{ quando(r.data) }}</template>
+        <span v-if="r.recomendado" class="recomendado">Recomendado</span>
+        <span v-for="p in meta" :key="p" :class="p.classe" :title="p.dica">{{ p.texto }}</span>
       </span>
-      <span class="chips">
-        <span v-if="r.recomendado" class="chip ok">recomendado</span>
-        <span v-if="r.toca_em_tudo" class="chip">toca em tudo</span>
-        <span v-if="r.pesado" class="chip erro">pesado</span>
-        <span v-if="r.suspeito" class="chip erro">suspeito</span>
-        <span v-if="mostrarTipo && r.tipo" class="chip">{{ r.tipo === 'filme' ? 'filme' : 'série' }}</span>
-        <span v-for="q in r.qualidade" :key="q" class="chip">{{ q }}</span>
-      </span>
-      <span v-for="a in r.alertas" :key="a" class="alerta">{{ a }}</span>
-      <span v-if="v" class="verificacao">
-        <span class="chip" :class="ESTADOS[v.estado]?.classe">{{ ESTADOS[v.estado]?.texto || v.estado }}</span>
-        <span v-if="v.estado !== 'verificando'" class="resumo">{{ v.resumo }}</span>
-        <span v-if="aviso" class="chip atencao">{{ aviso.texto }}</span>
-        <button v-if="v.detalhes?.length || v.quadros?.length" class="link" @click="vendoDetalhes = true">Detalhes</button>
-      </span>
-      <span v-if="v?.parecer" class="parecer">Claude: {{ v.parecer }}</span>
+    </span>
+    <span class="estado">
+      <button v-if="v" class="icone-estado" :class="ESTADOS[v.estado]?.classe" :title="dicaDaVerificacao" @click="vendoDetalhes = true">{{ ESTADOS[v.estado]?.icone }}</button>
+      <button v-else-if="tmdb" class="icone-estado apagado" title="Verificar se é este título" @click="verificar(r, contexto)">?</button>
+      <span v-if="aviso" class="icone-estado atencao" :title="`${aviso.texto}: use a TV ou o projetor.`"><Icone :nome="aviso.semImagem ? 'sem-imagem' : 'mudo'" /></span>
+      <span v-if="r.alertas?.length || r.pesado || r.suspeito" class="icone-estado atencao" :title="[...(r.alertas || []), r.pesado && 'Pesado', r.suspeito && 'Suspeito'].filter(Boolean).join('\n')">!</span>
     </span>
     <span class="botoes">
       <button class="botao" :class="{ principal: r.recomendado && !semDestaque }" :disabled="!!preparando" @click="assistir">
         <Icone nome="tocar" />{{ preparando === 'assistir' ? 'Abrindo…' : 'Assistir' }}
       </button>
-      <span class="secundarios">
-        <button class="link" :disabled="!!preparando" @click="baixar">{{ preparando === 'baixar' ? 'Preparando…' : baixarTemporada ? 'Baixar temporada' : 'Baixar' }}</button>
-        <button v-if="tmdb && !v" class="link" @click="verificar(r, contexto)">Verificar</button>
-      </span>
+      <button class="botao so-icone" :disabled="!!preparando" :title="baixarTemporada ? 'Baixar a temporada para o servidor' : 'Baixar para o servidor'" :aria-label="baixarTemporada ? 'Baixar temporada' : 'Baixar'" @click="baixar">
+        <Icone nome="torrents" />
+      </button>
     </span>
 
     <FolhaDeAssistir
@@ -164,27 +168,36 @@ function quando(iso) {
 <style scoped>
 .opcao {
   display: flex;
-  gap: 14px;
+  gap: 10px;
   align-items: center;
-  padding: 12px 0;
+  padding: 9px 0;
 }
 
 .texto {
   display: grid;
   flex: 1;
-  gap: 4px;
+  gap: 3px;
+  min-width: 0;
+}
+
+.linha-do-titulo {
+  display: flex;
+  align-items: center;
   min-width: 0;
 }
 
 .titulo {
-  overflow-wrap: anywhere;
-  font-size: 0.9rem;
+  overflow: hidden;
+  font-size: 0.88rem;
   font-weight: 600;
   line-height: 1.35;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .selo-t {
   display: inline-grid;
+  flex: none;
   place-items: center;
   width: 18px;
   height: 18px;
@@ -194,63 +207,135 @@ function quando(iso) {
   color: #fff;
   font-size: 0.68rem;
   font-weight: 700;
-  vertical-align: 1px;
 }
 
 .meta {
+  overflow: hidden;
   color: var(--texto-suave);
-  font-size: 0.8rem;
+  font-size: 0.78rem;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.meta > span + span::before {
+  content: ' · ';
+  color: var(--texto-fraco);
+}
+
+.recomendado {
+  color: var(--azul);
+  font-weight: 600;
+}
+
+.audio {
+  color: var(--texto);
 }
 
 .fraco {
   color: var(--vermelho);
 }
 
-.chips {
+.estado {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 2px;
-}
-
-.chips:empty {
-  display: none;
-}
-
-.alerta {
-  color: var(--vermelho);
-  font-size: 0.8rem;
-  line-height: 1.4;
-}
-
-.verificacao {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  flex: none;
+  gap: 4px;
   align-items: center;
-  margin-top: 2px;
-  font-size: 0.8rem;
 }
 
-.resumo {
+.icone-estado {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: var(--superficie-forte);
   color: var(--texto-suave);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: default;
 }
 
-.chip.atencao {
+button.icone-estado {
+  cursor: pointer;
+}
+
+.icone-estado svg {
+  width: 15px;
+  height: 15px;
+  stroke-width: 2;
+}
+
+.icone-estado.ok {
+  background: var(--azul-fundo);
+  color: var(--azul);
+}
+
+.icone-estado.atencao,
+.icone-estado.erro {
   background: var(--vermelho-fundo);
   color: var(--vermelho);
 }
 
+.icone-estado.apagado {
+  background: none;
+  color: var(--texto-fraco);
+  box-shadow: inset 0 0 0 1px var(--linha-forte);
+}
+
+.botoes {
+  display: flex;
+  flex: none;
+  gap: 6px;
+  align-items: center;
+}
+
+.botoes .botao svg {
+  width: 16px;
+  height: 16px;
+}
+
+.so-icone {
+  padding: 0 9px;
+}
+
+.chip.atencao,
 .chip.erro {
   background: var(--vermelho-fundo);
   color: var(--vermelho);
 }
 
-.parecer {
-  color: var(--texto-suave);
-  font-size: 0.8rem;
-  font-style: italic;
-  line-height: 1.45;
+/* No celular, o nome ganha a linha toda; as informações, os ícones e os botões dividem a de baixo. */
+@media (max-width: 560px) {
+  .opcao {
+    display: grid;
+    grid-template-areas: 'titulo titulo titulo' 'meta estado botoes';
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    gap: 4px 8px;
+  }
+
+  .texto {
+    display: contents;
+  }
+
+  .linha-do-titulo {
+    grid-area: titulo;
+  }
+
+  .meta {
+    grid-area: meta;
+    align-self: center;
+  }
+
+  .estado {
+    grid-area: estado;
+  }
+
+  .botoes {
+    grid-area: botoes;
+  }
 }
 
 .parecer-grande {
@@ -259,37 +344,11 @@ function quando(iso) {
   line-height: 1.5;
 }
 
-.botoes {
-  display: grid;
-  flex: none;
-  gap: 6px;
-  justify-items: center;
-}
-
-.botoes .botao svg {
-  width: 16px;
-  height: 16px;
-}
-
-.secundarios {
-  display: flex;
-  gap: 12px;
-}
-
 .nota-da-folha {
   margin: 12px 0 0;
   font-size: 0.82rem;
 }
 
-.link {
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--marca);
-  font: inherit;
-  font-size: 0.82rem;
-  cursor: pointer;
-}
 
 .nome-do-arquivo {
   margin: -4px 0 10px;

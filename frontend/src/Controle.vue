@@ -120,7 +120,8 @@ async function gerada(l) {
     await new Promise((ok) => setTimeout(ok, 3000))
     const g = (await api(`/api/legendas/${sessao.value?.chave}`).catch(() => null))?.escolhida?.geracao
     if (!g || g.estado === 'erro' || g.estado === 'parada') return
-    if (g.ate > (estado.value?.posicao || 0) + 180 || g.estado === 'pronta') break
+    // Só com a tela já tocando: antes disso, a posição guardada pode ser a de outra vez.
+    if (estado.value?.estado === 'PLAYING' && (g.ate > (estado.value?.posicao || 0) + 180 || g.estado === 'pronta')) break
   }
   reenviar('Legenda gerada na tela: o vídeo recomeça do mesmo ponto.')
 }

@@ -241,7 +241,9 @@ func TestFalasDasPalavras(t *testing.T) {
 		t.Fatalf("falas: %+v", falas)
 	}
 	srt := srtDasFalas(falas)
-	if !strings.HasPrefix(srt, "1\n00:00:00,200 --> 00:00:01,200\nHow much money is that?\n\n2\n") {
+	// Meio segundo a mais na tela, sem entrar na próxima fala; a curta fica ao menos 1 s.
+	if !strings.HasPrefix(srt, "1\n00:00:00,200 --> 00:00:01,450\nHow much money is that?\n\n2\n00:00:01,500 --> 00:00:03,400\n") ||
+		!strings.Contains(srt, "00:00:05,000 --> 00:00:06,000\nLater") {
 		t.Fatalf("srt:\n%s", srt)
 	}
 	if got := emDuasLinhas("Well, just say the word and I'll take you on a ride along."); got != "Well, just say the word and\nI'll take you on a ride along." {
@@ -319,6 +321,23 @@ func TestLegendaGeradaNaTela(t *testing.T) {
 	if envios() != 2 {
 		t.Fatal("devia mandar de novo com a legenda maior")
 	}
+	// A geração não deu conta dos 8 minutos: perto do fim, espera; quando a da TV acaba, 3 minutos
+	// à frente bastam (melhor um envio a mais que a TV sem legenda).
+	if !e.a.telas.tocandoNumaTela(chave) || e.a.telas.tocandoNumaTela("filme:201") {
+		t.Fatal("tocandoNumaTela")
+	}
+	s.legendaAte = 660
+	for b := 11; b < 15; b++ {
+		e.a.db.Exec(`INSERT INTO blocos_gerados (chave, bloco, palavras) VALUES (?, ?, '[]')`, chave, b)
+	}
+	e.a.telas.atualizarLegendaGerada(te, s, 640)
+	if envios() != 2 {
+		t.Fatal("a legenda da TV ainda não acabou: espera os 8 minutos")
+	}
+	e.a.telas.atualizarLegendaGerada(te, s, 657)
+	if envios() != 3 {
+		t.Fatal("a legenda da TV acabou: devia mandar com 3 minutos à frente")
+	}
 
 	// Parar para puxar o áudio e voltar do mesmo ponto.
 	tv.mu.Lock()
@@ -329,7 +348,7 @@ func TestLegendaGeradaNaTela(t *testing.T) {
 		t.Fatal("a TV devia parar")
 	}
 	voltar()
-	if envios() != 3 {
+	if envios() != 4 {
 		t.Fatal("a TV devia voltar")
 	}
 	e.a.telas.mu.Lock()

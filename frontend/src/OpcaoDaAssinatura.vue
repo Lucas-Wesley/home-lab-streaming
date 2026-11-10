@@ -22,6 +22,9 @@ const aberta = ref(false)
 const pedido = ref(props.download)
 const pedindo = ref(false)
 
+// "Duna [L]", "El Camino LEG", "Private Eyes (Legendado)": a versão com o áudio original.
+const original = /\[L\]|\bLEG\b|legendad/i.test(props.nome)
+
 const ESTADOS = { 'na fila': 'na fila para baixar', baixando: 'baixando', esperando: 'esperando a assinatura ficar livre', baixado: 'baixado no servidor', erro: 'erro ao baixar' }
 
 async function baixar() {
@@ -41,12 +44,14 @@ async function baixar() {
   <div class="opcao">
     <span class="texto">
       <span class="titulo"><span class="selo"><Icone nome="canais" /></span>Assinatura</span>
-      <span class="meta">{{ nome }}<template v-if="posicao > 30"> · parou no meio</template></span>
-      <span v-if="pedido" class="chips"><span class="chip" :class="{ ok: pedido.estado === 'baixado', erro: pedido.estado === 'erro' }">{{ ESTADOS[pedido.estado] || pedido.estado }}</span></span>
+      <span class="meta" :title="nome">
+        <span v-if="original" class="original">Áudio original · </span>{{ nome }}<template v-if="posicao > 30"> · parou no meio</template>
+        <template v-if="pedido"> · <span :class="{ ok: pedido.estado === 'baixado', erro: pedido.estado === 'erro' }">{{ ESTADOS[pedido.estado] || pedido.estado }}</span></template>
+      </span>
     </span>
     <span class="botoes">
       <button class="botao principal" @click="aberta = true"><Icone nome="tocar" />Assistir</button>
-      <button v-if="!pedido" class="link" :disabled="pedindo" @click="baixar">{{ pedindo ? 'Pedindo…' : 'Baixar' }}</button>
+      <button v-if="!pedido" class="botao so-icone" :disabled="pedindo" title="Baixar para o servidor (quando a assinatura estiver livre)" aria-label="Baixar" @click="baixar"><Icone nome="torrents" /></button>
     </span>
 
     <FolhaDeAssistir v-if="aberta" :titulo="rotulo" origem="assinatura" :nome="nome" :chave="chave" :capa="capa" :posicao="posicao" @fechar="aberta = false">
@@ -58,9 +63,9 @@ async function baixar() {
 <style scoped>
 .opcao {
   display: flex;
-  gap: 14px;
+  gap: 10px;
   align-items: center;
-  padding: 12px 0;
+  padding: 9px 0;
 }
 
 .texto {
@@ -95,36 +100,35 @@ async function baixar() {
 }
 
 .meta {
-  overflow-wrap: anywhere;
+  overflow: hidden;
   color: var(--texto-suave);
-  font-size: 0.8rem;
+  font-size: 0.78rem;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.original {
+  color: var(--texto);
+  font-weight: 600;
+}
+
+.meta .ok {
+  color: var(--azul);
+}
+
+.meta .erro {
+  color: var(--vermelho);
 }
 
 .botoes {
-  display: grid;
+  display: flex;
   flex: none;
   gap: 6px;
-  justify-items: center;
+  align-items: center;
 }
 
-.link {
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--marca);
-  font: inherit;
-  font-size: 0.82rem;
-  cursor: pointer;
-}
-
-.chips {
-  display: flex;
-  gap: 6px;
-}
-
-.chip.erro {
-  background: var(--vermelho-fundo);
-  color: var(--vermelho);
+.so-icone {
+  padding: 0 9px;
 }
 
 .botoes .botao svg {

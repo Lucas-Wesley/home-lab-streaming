@@ -61,10 +61,12 @@ type controleDasTelas struct {
 	// Enquanto uma tela toca, o servidor pergunta a posição a cada intervalo e guarda: o celular
 	// pode estar fechado, e "Continuar assistindo" tem de saber onde o vídeo parou na TV.
 	intervalo time.Duration
+	// O projetor leva um tempo para dizer que só pausou no Stop: confere depois desta espera.
+	esperaDoStop time.Duration
 }
 
 func novoControleDasTelas(a *app) *controleDasTelas {
-	c := &controleDasTelas{a: a, sessoes: map[string]sessao{}, enderecos: map[string]tela{}, http: &http.Client{Timeout: 8 * time.Second}, httpDoSeek: &http.Client{Timeout: 12 * time.Second}, intervalo: 15 * time.Second}
+	c := &controleDasTelas{a: a, sessoes: map[string]sessao{}, enderecos: map[string]tela{}, http: &http.Client{Timeout: 8 * time.Second}, httpDoSeek: &http.Client{Timeout: 12 * time.Second}, intervalo: 15 * time.Second, esperaDoStop: time.Second}
 	// Outro aparelho assumiu a assinatura: a tela que tocava para, em vez de ficar com erro na tela.
 	a.conexao.aoTrocarDeDono = func(anterior string) {
 		t, err := a.tela(context.Background(), anterior)
@@ -103,8 +105,25 @@ func (c *controleDasTelas) acompanhar(t tela, desde string) {
 // atualizarLegendaGerada: a tela só lê a legenda quando o vídeo chega. Se a legenda gerada que ela
 // recebeu está acabando e já há bem mais pronta (8 min à frente) ou ficou completa, manda o vídeo
 // de novo, do mesmo ponto. Cada envio apaga a imagem por uns segundos: com pouco à frente, mandar a
-// cada minuto ouvido faria a TV recarregar várias vezes seguidas. Num episódio, são uns 2 envios.
-const folgaParaReenviar = 8 * 60.0
+// cada minuto ouvido faria a TV recarregar várias vezes seguidas. Se a da tela já acabou (a geração
+// não deu conta, ou o vídeo foi mandado antes de haver legenda ali), 3 min à frente bastam: melhor
+// um envio a mais que a tela sem legenda.
+const (
+	folgaParaReenviar     = 8 * 60.0
+	folgaSemLegendaNaTela = 3 * 60.0
+)
+
+// tocandoNumaTela: alguma tela toca este vídeo agora (a geração vai mais à frente antes de revisar).
+func (c *controleDasTelas) tocandoNumaTela(chave string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, s := range c.sessoes {
+		if s.Chave == chave {
+			return true
+		}
+	}
+	return false
+}
 
 func (c *controleDasTelas) atualizarLegendaGerada(t tela, s sessao, posicao float64) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
@@ -115,7 +134,9 @@ func (c *controleDasTelas) atualizarLegendaGerada(t tela, s sessao, posicao floa
 	}
 	agora := c.a.coberturaDaGerada(ctx, s.Chave, posicao)
 	acabando := posicao > s.legendaAte-45
-	if !acabando || (agora < posicao+folgaParaReenviar && !(g.Estado == "pronta" && agora > s.legendaAte)) {
+	acabou := posicao > s.legendaAte-5
+	completa := g.Estado == "pronta" && agora > s.legendaAte
+	if !acabando || agora <= s.legendaAte || !(agora >= posicao+folgaParaReenviar || completa || (acabou && agora >= posicao+folgaSemLegendaNaTela)) {
 		return
 	}
 	m := reChaveDeVideo.FindStringSubmatch(s.Chave)
@@ -785,6 +806,19 @@ func (c *controleDasTelas) comandar(ctx context.Context, t tela, comando string,
 	case "parar":
 		_, _ = c.estado(ctx, t) // guarda onde parou antes de fechar
 		_, err = c.acao(ctx, t, "Stop", nil)
+		// O projetor, depois de um Seek, às vezes só pausa no primeiro Stop (e segura o vídeo,
+		// que pela assinatura é a única conexão): confere e manda de novo.
+		for i := 0; err == nil && i < 3; i++ {
+			select {
+			case <-ctx.Done():
+			case <-time.After(c.esperaDoStop):
+			}
+			info, e := c.acao(ctx, t, "GetTransportInfo", nil)
+			if e != nil || (info["CurrentTransportState"] != "PAUSED_PLAYBACK" && info["CurrentTransportState"] != "PLAYING") {
+				break
+			}
+			_, err = c.acao(ctx, t, "Stop", nil)
+		}
 		c.mu.Lock()
 		delete(c.sessoes, t.ID)
 		c.mu.Unlock()

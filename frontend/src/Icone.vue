@@ -68,6 +68,10 @@ defineProps({ nome: { type: String, required: true } })
       <path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" />
       <path d="M16 9.5l5 5M21 9.5l-5 5" />
     </template>
+    <template v-else-if="nome === 'sem-imagem'">
+      <rect x="3.5" y="5.5" width="17" height="12" rx="2" />
+      <path d="M4 4l16 16" />
+    </template>
     <template v-else-if="nome === 'torrents'">
       <path d="M12 4v11M7.5 10.5L12 15l4.5-4.5" />
       <path d="M4.5 15v3a2 2 0 002 2h11a2 2 0 002-2v-3" />

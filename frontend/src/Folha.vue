@@ -3,7 +3,7 @@ import { onBeforeUnmount, onMounted } from 'vue'
 import Icone from './Icone.vue'
 
 // Folha de ações: sobe do pé da tela, com véu de blur leve (design system).
-defineProps({ titulo: { type: String, default: '' } })
+defineProps({ titulo: { type: String, default: '' }, larga: { type: Boolean, default: false } })
 const emit = defineEmits(['fechar'])
 
 function aoTeclar(e) {
@@ -16,7 +16,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', aoTeclar))
 <template>
   <Teleport to="body">
     <div class="veu" @click.self="emit('fechar')">
-      <section class="folha vidro" role="dialog" :aria-label="titulo">
+      <section class="folha vidro" :class="{ larga }" role="dialog" :aria-label="titulo">
         <header>
           <h2>{{ titulo }}</h2>
           <button class="botao icone" aria-label="Fechar" @click="emit('fechar')"><Icone nome="fechar" /></button>
@@ -48,6 +48,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', aoTeclar))
   border: 1px solid var(--vidro-borda);
   border-radius: var(--raio-g) var(--raio-g) 0 0;
   box-shadow: var(--sombra);
+}
+
+/* Lista de versões de torrent: os nomes são longos, a folha cresce no computador. */
+.folha.larga {
+  width: min(760px, 100%);
 }
 
 header {

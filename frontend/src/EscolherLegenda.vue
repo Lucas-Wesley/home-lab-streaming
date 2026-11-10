@@ -121,7 +121,7 @@ onBeforeUnmount(() => clearInterval(relogio))
   <div class="legendas">
     <div v-if="erro" class="aviso erro">{{ erro }}</div>
     <p v-else-if="!dados" class="vazio">Procurando legendas…</p>
-    <p v-else-if="!dados.configurado && !dados.gerar?.disponivel" class="aviso">Para buscar legendas, conecte o OpenSubtitles em <a href="#/ajustes">Ajustes</a>.</p>
+    <p v-else-if="!dados.configurado && !dados.gerar?.disponivel" class="aviso">Para buscar legendas, conecte o OpenSubtitles em <a href="#/ajustes/legendas">Ajustes</a>.</p>
 
     <!-- Em uso: o idioma em destaque, a sincronia e o ajuste -->
     <div v-if="dados?.configurado || dados?.gerar?.disponivel" class="em-uso">

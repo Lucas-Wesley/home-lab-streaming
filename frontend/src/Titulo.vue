@@ -307,7 +307,7 @@ onMounted(async () => {
       </header>
 
       <div v-if="erroDosTorrents" class="aviso erro">
-        {{ erroDosTorrents }} <a v-if="erroDosTorrents.includes('Ajustes')" href="#/ajustes">Abrir Ajustes</a>
+        {{ erroDosTorrents }} <a v-if="erroDosTorrents.includes('Ajustes')" :href="erroDosTorrents.includes('TMDB') ? '#/ajustes/tmdb' : '#/ajustes/torrents'">Abrir Ajustes</a>
       </div>
       <!-- Filme: a assinatura primeiro, depois as versões de torrent -->
       <template v-if="!ehSerie && (filmesDaAssinatura.length || versoes.length)">

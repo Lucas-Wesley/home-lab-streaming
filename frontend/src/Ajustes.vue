@@ -5,7 +5,22 @@ import Sugestoes from './Sugestoes.vue'
 import { api } from './api.js'
 import { carregarTelas, telas } from './telas.js'
 
-defineProps({ tela: { type: String, default: '' } })
+const props = defineProps({
+  tela: { type: String, default: '' },
+  secao: { type: String, default: '' },
+})
+
+// Ajustes em níveis (design system): a primeira tela lista as seções; cada uma abre numa página.
+const SECOES = [
+  { id: 'assinatura', nome: 'Assinatura', descricao: 'O acesso do provedor IPTV, a situação e o vencimento.' },
+  { id: 'catalogo', nome: 'Catálogo', descricao: 'Canais, filmes e séries da assinatura; atualizar e categorias adultas.' },
+  { id: 'telas', nome: 'Telas', descricao: 'TVs e projetores da casa que tocam vídeo pela rede.' },
+  { id: 'torrents', nome: 'Busca de torrents', descricao: 'A conexão com o Prowlarr e os indexadores.' },
+  { id: 'tmdb', nome: 'Filmes e séries (TMDB)', descricao: 'Pôsteres e temporadas na busca de torrents.' },
+  { id: 'legendas', nome: 'Legendas (OpenSubtitles)', descricao: 'Legendas em português e inglês para o player e as telas.' },
+  { id: 'sugestoes', nome: 'Sugestões de melhoria', descricao: 'Anote o que pode melhorar no Streaming; o Claude faz e responde aqui.' },
+]
+const atual = computed(() => SECOES.find((s) => s.id === props.secao))
 const recado = inject('recado')
 
 const conta = ref(null)
@@ -239,10 +254,25 @@ onBeforeUnmount(() => clearInterval(relogio))
 
 <template>
   <div class="pagina">
-    <h1>Ajustes</h1>
+    <template v-if="!atual">
+      <h1>Ajustes</h1>
+      <nav class="lista-de-ajustes" aria-label="Seções dos ajustes">
+        <a v-for="s in SECOES" :key="s.id" :href="`#/ajustes/${s.id}`">
+          <span>
+            <span class="nome">{{ s.nome }}</span>
+            <span class="descricao">{{ s.descricao }}</span>
+          </span>
+          <Icone nome="avancar" class="seta" />
+        </a>
+      </nav>
+    </template>
+    <template v-else>
+      <a href="#/ajustes" class="voltar-ajustes"><Icone nome="voltar" /> Ajustes</a>
+      <h1>{{ atual.nome }}</h1>
+    </template>
     <div v-if="erro" class="aviso erro">{{ erro }}</div>
 
-    <p class="rotulo">Assinatura</p>
+    <template v-if="atual?.id === 'assinatura'">
     <template v-if="conta?.configurado && !trocando">
       <dl class="dados">
         <dt>Servidor</dt>
@@ -277,7 +307,9 @@ onBeforeUnmount(() => clearInterval(relogio))
       </div>
     </form>
 
-    <p class="rotulo">Catálogo</p>
+    </template>
+
+    <template v-else-if="atual?.id === 'catalogo'">
     <p class="suave explicacao">
       <template v-if="catalogo?.sincronizacao?.rodando">{{ catalogo.sincronizacao.etapa }}…</template>
       <template v-else-if="catalogo?.sincronizacao?.terminada_em">Atualizado em {{ data(catalogo.sincronizacao.terminada_em, true) }}. Atualiza sozinho uma vez por dia.</template>
@@ -297,7 +329,9 @@ onBeforeUnmount(() => clearInterval(relogio))
       Mostrar as categorias adultas
     </label>
 
-    <p class="rotulo">Telas</p>
+    </template>
+
+    <template v-else-if="atual?.id === 'telas'">
     <p class="suave explicacao">TVs e projetores da casa que tocam vídeo pela rede (DLNA). Toque no nome para trocar.</p>
     <ul v-if="telas.length" class="lista">
       <li v-for="t in telas" :key="t.id" class="tela">
@@ -312,7 +346,9 @@ onBeforeUnmount(() => clearInterval(relogio))
       <button class="botao" :disabled="procurando" @click="procurarTelas">{{ procurando ? 'Procurando…' : 'Procurar telas' }}</button>
     </div>
 
-    <p class="rotulo">Busca de torrents</p>
+    </template>
+
+    <template v-else-if="atual?.id === 'torrents'">
     <p class="suave explicacao">
       A busca da aba Torrents pergunta ao Prowlarr, que fica no servidor. Os indexadores são cadastrados na interface dele, em
       <a href="https://192.168.1.20:8448" target="_blank" rel="noopener">192.168.1.20:8448</a>.
@@ -354,7 +390,9 @@ onBeforeUnmount(() => clearInterval(relogio))
       </div>
     </form>
 
-    <p class="rotulo">Filmes e séries (TMDB)</p>
+    </template>
+
+    <template v-else-if="atual?.id === 'tmdb'">
     <p class="suave explicacao">
       Com o TMDB, a busca da aba Torrents mostra primeiro os filmes e séries, com pôster; ao abrir um, os torrents vêm organizados por temporada e
       episódio. A chave é de graça, em themoviedb.org → Configurações → API.
@@ -379,7 +417,9 @@ onBeforeUnmount(() => clearInterval(relogio))
     </form>
     <p class="suave atribuicao">Este produto usa a API do TMDB, mas não é endossado nem certificado pelo TMDB.</p>
 
-    <p class="rotulo">Legendas (OpenSubtitles)</p>
+    </template>
+
+    <template v-else-if="atual?.id === 'legendas'">
     <p class="suave explicacao">
       Legendas em português e inglês para filmes, episódios e torrents, no player e nas telas. A chave é de graça, em opensubtitles.com → API
       consumers. Cada legenda escolhida é baixada uma vez e fica guardada no servidor.
@@ -403,17 +443,16 @@ onBeforeUnmount(() => clearInterval(relogio))
       </div>
     </form>
 
-    <p class="rotulo">Sugestões de melhoria</p>
+    </template>
+
+    <template v-else-if="atual?.id === 'sugestoes'">
     <p class="suave explicacao">Anote o que pode melhorar no Streaming. Depois é só pedir ao Claude para ver as sugestões: ele faz as mudanças e responde aqui.</p>
     <Sugestoes :tela="tela" />
+    </template>
   </div>
 </template>
 
 <style scoped>
-.rotulo:first-of-type {
-  margin-top: 8px;
-}
-
 .atribuicao {
   margin: 10px 0 0;
   font-size: 0.75rem;

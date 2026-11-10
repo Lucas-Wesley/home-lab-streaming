@@ -7,12 +7,16 @@ const MENSAGEM = `*Usuário:* usuario-teste
 *DNS:* http://localhost:8097`
 
 test('do acesso colado até a página da série', async ({ page }) => {
+  // Ajustes em níveis: a primeira tela só lista as seções.
   await page.goto('/#/ajustes')
+  await page.getByRole('link', { name: /Assinatura/ }).click()
   await page.getByLabel('Mensagem do provedor').fill(MENSAGEM)
   await page.getByRole('button', { name: 'Guardar acesso' }).click()
 
   await expect(page.getByText('usuario-teste')).toBeVisible()
   await expect(page.getByText('Ativa')).toBeVisible()
+  await page.getByRole('link', { name: 'Ajustes' }).first().click()
+  await page.getByRole('link', { name: /Catálogo/ }).click()
   await expect(page.getByText('2 canais')).toBeVisible({ timeout: 15000 })
   await expect(page.getByText('2 filmes')).toBeVisible()
   await expect(page.getByText('1 série', { exact: true })).toBeVisible()

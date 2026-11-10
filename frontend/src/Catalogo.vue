@@ -91,7 +91,7 @@ onBeforeUnmount(() => observador?.disconnect())
       </button>
     </div>
     <p v-else-if="!erro && !carregando" class="vazio">
-      O catálogo ainda está vazio. Cole o acesso da assinatura em <a href="#/ajustes">Ajustes</a> e espere a primeira sincronização.
+      O catálogo ainda está vazio. Cole o acesso da assinatura em <a href="#/ajustes/assinatura">Ajustes</a> e espere a primeira sincronização.
     </p>
 
     <Grade :itens="itens" />

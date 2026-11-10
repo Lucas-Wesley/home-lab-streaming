@@ -132,7 +132,7 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', aoMudarHash))
       <Titulo v-else-if="rota.nome === 'titulo'" :key="rota.param" :param="rota.param" />
       <Torrent v-else-if="rota.nome === 'torrent'" :key="rota.param" :hash="rota.param" />
       <Archive v-else-if="rota.nome === 'archive'" />
-      <Ajustes v-else-if="rota.nome === 'ajustes'" :tela="telaAnterior" />
+      <Ajustes v-else-if="rota.nome === 'ajustes'" :tela="telaAnterior" :secao="rota.param" />
       <Inicio v-else :busca="rota.opcoes.get('q') || ''" />
     </main>
 

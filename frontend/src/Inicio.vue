@@ -110,7 +110,7 @@ onMounted(async () => {
 
     <div v-if="erro" class="aviso erro">{{ erro }}</div>
     <div v-if="situacao && !situacao.configurado" class="aviso">
-      Para começar, cole a mensagem do seu provedor em <a href="#/ajustes">Ajustes</a>.
+      Para começar, cole a mensagem do seu provedor em <a href="#/ajustes/assinatura">Ajustes</a>.
     </div>
 
     <template v-if="resultado">

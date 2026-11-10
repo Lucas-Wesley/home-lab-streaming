@@ -1,9 +1,10 @@
 # Design system das apps do homelab
 
-Vale para a Biblioteca Digital, o Acervo, o Flashcards, o Streaming e as próximas apps.
+Vale para a Biblioteca Digital, o Acervo, o Flashcards, o Streaming, o Hub e as próximas apps.
 Há uma cópia igual em `docs/DESIGN-SYSTEM.md` de cada app; os tokens ficam no começo do
 `frontend/src/style.css` de cada uma, com os mesmos nomes e valores, menos a cor do app (`--marca`).
-Definido pelo Lucas em 06/11/2026 e revisto em 09/11/2026 (segunda versão, abaixo).
+Definido pelo Lucas em 06/11/2026 e revisto em 09/11/2026 (segunda versão, abaixo) e em 10/11/2026
+(hierarquia dos títulos e Ajustes em níveis).
 
 A extensão do Chrome ainda usa a paleta da primeira versão (creme, Literata e terracota) no
 `popup.css` e no botão; passa para esta quando for mexida.
@@ -20,7 +21,7 @@ entram numa terceira revisão.
 
 1. **O texto vem primeiro.** Tudo o que não é conteúdo é menor, mais claro e mais discreto que ele.
 2. **Uma cor por app.** Cada app tem a sua (`--marca`): Biblioteca em azul, Acervo em verde,
-   Flashcards em violeta e Streaming em âmbar. Ela diz em qual app se está e aparece em poucos lugares: o ícone do app
+   Flashcards em violeta, Streaming em âmbar e Hub em ciano petróleo. Ela diz em qual app se está e aparece em poucos lugares: o ícone do app
    no menu, o ícone do item ativo, o botão principal, o foco, os links e o progresso.
 3. **Neutro no resto.** Branco, cinzas frios e tinta escura. Azul só para informação e vermelho
    só para erro e atenção.
@@ -59,6 +60,7 @@ Sucesso não tem verde próprio: usa o azul.
 | Acervo | `#127a5a` | `#5ccf9f` | `#e3f3ec` / `#15302a` |
 | Flashcards | `#6b47d1` | `#b19cff` | `#eee9fb` / `#2a2343` |
 | Streaming | `#b45309` | `#f5a65b` | `#fdf0e1` / `#3a2814` |
+| Hub | `#0e7490` | `#67cbe0` | `#e1f3f7` / `#12303a` |
 
 O texto sobre a cor do app usa `--marca-texto`: branco no claro e `--fundo` no escuro. Uma app nova
 escolhe uma cor que não se confunda com as outras nem com o vermelho.
@@ -72,10 +74,19 @@ cor do app.
   lista, nome do app e títulos de página também ficam nela.
 - **Leitura:** Literata, só no texto que se lê de verdade: o leitor do Acervo, os livros da
   Biblioteca, trechos de resultado de busca e o verso dos cartões.
-- **Escala:** títulos de página com 28 px, peso 700 e espaçamento −0,022em. Na lista, título com
-  17 px e peso 650, resumo com 14,5 px em `--texto-suave` e metadados com 12 px.
-- **Rótulos de grupo:** 13 px, peso 600, em `--texto-suave`, em caixa normal (nunca em
-  maiúsculas).
+- **Hierarquia** (revista em 10/11/2026): **um título é sempre maior que o que vem abaixo dele.**
+
+  | Nível | Tamanho e peso | Cor | Classe | Uso |
+  |---|---|---|---|---|
+  | Título da página | 28 px, 700, −0,022em | `--texto` | `.pagina h1` | Um por tela |
+  | Título de seção | 20 px, 650, −0,012em | `--texto` | `.rotulo` | O que agrupa uma lista ou um bloco ("Continuar assistindo", "Contêineres") |
+  | Título de item | 17 px, 650 | `--texto` | — | A linha de uma lista |
+  | Descrição | 14,5 px, 400 | `--texto-suave` | `.descricao`, `.descricao-da-pagina` | O resumo do item ou da página |
+  | Metadado | 12 px | `--texto-fraco` | — | Data, versão, contagens pequenas |
+  | Rótulo de campo ou de número | 13 px, 600 | `--texto-suave` | `.rotulo-campo`, `.rotulo-numero` | Em cima de um campo de formulário ou de um número grande, nunca de uma lista |
+
+  O erro que isso corrige: um título de seção pequeno e cinza (13 px) em cima de itens maiores
+  (17 px) fazia a seção parecer menos importante que o que ela contém.
 - **Leitura:** 17,5 px com entrelinha 1,72, coluna de no máximo 720 px.
 
 ## Forma e espaço
@@ -105,9 +116,15 @@ cor do app.
   bloco em `--superficie` com raio de 18 px e rótulo na cor do app. Um por tela, no máximo.
 - **Aviso rápido:** pílula de vidro no pé da tela, que some em 4 s.
 - **Folha de ações:** sobe do pé da tela, com raio de 18 px e véu com blur leve.
-- **Ajustes:** último item do menu, discreto. Toda app tem nele a seção **Sugestões de melhoria**
+- **Ajustes:** último item do menu, discreto. **Em níveis** (10/11/2026): a primeira tela só tem o
+  título "Ajustes" e a lista das seções (`.lista-de-ajustes`: nome em 17 px, descrição de uma linha
+  e uma seta); cada seção abre numa página própria (`#/ajustes/<seção>`) com "‹ Ajustes" para
+  voltar, o nome da seção como título e uma descrição (`.descricao-da-pagina`). Nada de listar o
+  conteúdo de todas as seções numa tela só. Uma lista dentro de uma seção (as instruções da IA)
+  segue o mesmo padrão, e o item abre a sua página. Toda app tem a seção **Sugestões de melhoria**
   (campo de texto, botão "Enviar sugestão" e a lista com estado e a resposta do Claude), sobre a
-  API comum `/api/sugestoes` (ver ARQUITETURA do Hub).
+  API comum `/api/sugestoes` (ver ARQUITETURA do Hub); as que usam IA têm também **Instruções da
+  IA**.
 - **Barra de seleção:** pílula escura (`--destaque`) com ícones de 20 px, que aparece ao
   selecionar texto; no celular fica abaixo da seleção, porque em cima vem o menu do sistema.
 - **Trecho com explicação:** sublinhado como link (pontilhado e cinza enquanto a IA trabalha); o
@@ -117,6 +134,10 @@ cor do app.
   em `--texto-suave` embaixo, sem cartão. Gráfico de uma série em `--azul`: colunas de até 24 px
   com a ponta arredondada (4 px), fios do eixo em `--linha` e o valor do dia escolhido numa linha
   acima, ao tocar ou passar o mouse. Intensidade (calendário) em tons do mesmo azul.
+- **Barra de uso (Hub):** nome e "X de Y" numa linha, barra de 8 px em `--azul` sobre
+  `--azul-fundo`; passa para `--vermelho` acima de 85%, com o chip "Quase cheio". Partes de um
+  todo (o disco da VM) vão numa barra empilhada de 14 px, com 2 px entre as partes, e uma legenda
+  com o valor de cada uma.
 - **Resultado de busca no texto:** linha da lista com o título (peso 500), onde está (página e
   capítulo) em `--texto-suave` e o trecho em Literata, com as palavras achadas em `<mark>` de
   fundo `--azul-fundo`. Tocar na linha leva ao ponto achado.
@@ -126,7 +147,7 @@ cor do app.
   o link **Abrir** em azul, e recolhe em 6 s.
 - **Ícone da app:** um desenho de linha preta (traço de 12 px em 512) sobre fundo branco, centrado,
   diferente em cada app: livro aberto na Biblioteca, livros na estante no Acervo, cartões sobrepostos
-  no Flashcards, tela com um triângulo de "tocar" no Streaming, bandeja com uma seta saindo na extensão do Chrome (traço mais grosso, porque vive em
+  no Flashcards, tela com um triângulo de "tocar" no Streaming, dois servidores empilhados no Hub, bandeja com uma seta saindo na extensão do Chrome (traço mais grosso, porque vive em
   16 px na barra). Dentro da app, o mesmo desenho aparece em branco sobre a cor do app, no menu.
 
 ## Evitar

@@ -244,7 +244,7 @@ onBeforeUnmount(() => clearInterval(relogio))
     <section v-if="buscaAberta" class="resultados">
       <p class="rotulo">Resultados <button class="limpar" type="button" @click="limparBusca">Voltar aos downloads</button></p>
       <div v-if="erroDaBusca" class="aviso erro">
-        {{ erroDaBusca }} <a v-if="erroDaBusca.includes('Ajustes')" href="#/ajustes">Abrir Ajustes</a>
+        {{ erroDaBusca }} <a v-if="erroDaBusca.includes('Ajustes')" :href="erroDaBusca.includes('TMDB') ? '#/ajustes/tmdb' : '#/ajustes/torrents'">Abrir Ajustes</a>
       </div>
       <p v-if="buscando" class="vazio">Perguntando aos indexadores…</p>
       <p v-else-if="resultados && !resultados.length" class="vazio">Nada encontrado para “{{ busca }}”.</p>

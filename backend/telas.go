@@ -717,6 +717,9 @@ type estadoDaTela struct {
 	Volume  int     `json:"volume"`
 	Mudo    bool    `json:"mudo"`
 	Sessao  *sessao `json:"sessao,omitempty"`
+	// Idade: há quantos milissegundos a posição foi lida, na hora da resposta. A legenda no celular
+	// (S31) conta o tempo a partir da leitura, e não da chegada da resposta.
+	Idade int64 `json:"idade_ms"`
 }
 
 func (c *controleDasTelas) estado(ctx context.Context, t tela) (estadoDaTela, error) {
@@ -726,8 +729,11 @@ func (c *controleDasTelas) estado(ctx context.Context, t tela) (estadoDaTela, er
 		return e, err
 	}
 	e.Estado = info["CurrentTransportState"]
+	pedida := time.Now()
+	lida := pedida
 	if pos, err := c.acao(ctx, t, "GetPositionInfo", nil); err == nil {
 		e.Posicao, e.Duracao = segundosDe(pos["RelTime"]), segundosDe(pos["TrackDuration"])
+		lida = pedida.Add(time.Since(pedida) / 2) // a tela respondeu no meio da chamada, mais ou menos
 	}
 	if t.volume != "" {
 		if v, err := c.acaoDeVolume(ctx, t, "GetVolume", nil); err == nil {
@@ -754,6 +760,7 @@ func (c *controleDasTelas) estado(ctx context.Context, t tela) (estadoDaTela, er
 	if e.Sessao != nil && !e.Sessao.AoVivo && e.Posicao > 0 {
 		c.a.guardarProgressoDaTela(*e.Sessao, e.Posicao, e.Duracao)
 	}
+	e.Idade = time.Since(lida).Milliseconds()
 	return e, nil
 }
 

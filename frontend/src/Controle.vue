@@ -1,5 +1,5 @@
 <script setup>
-import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
 import EscolherLegenda from './EscolherLegenda.vue'
 import Folha from './Folha.vue'
 import Icone from './Icone.vue'
@@ -26,14 +26,32 @@ const aoVivo = computed(() => sessao.value?.ao_vivo)
 const posicao = computed(() => arrastando.value ?? estado.value?.posicao ?? 0)
 const parada = computed(() => !sessao.value && ['STOPPED', 'NO_MEDIA_PRESENT'].includes(estado.value?.estado))
 
-// A legenda no celular (S31) precisa do segundo exato: entre uma leitura e outra (1,5 s), o tempo
-// anda pelo relógio do celular enquanto a tela toca.
-const lidoEm = ref(0)
+// A legenda no celular (S31) precisa do segundo exato. A tela diz a posição com milésimos; o celular
+// guarda em que instante ela foi lida (descontando o tempo da resposta, idade_ms) e anda pelo
+// próprio relógio daí. Leituras novas que diferem pouco do relógio só o puxam aos poucos (a fala em
+// destaque não pula para trás e para a frente); diferença grande é busca ou pausa e vale na hora.
 const agora = ref(Date.now())
 const versaoDaLegenda = ref(0)
+const marco = shallowRef(null) // { posicao, em, tocando }
+function acertarRelogio(e, chegada) {
+  const em = chegada - (e.idade_ms || 0) - 15 // ~15 ms de rede na casa
+  const tocando = e.estado === 'PLAYING'
+  const lida = e.posicao || 0
+  const m = marco.value
+  if (m?.tocando && tocando) {
+    const previsto = m.posicao + (em - m.em) / 1000
+    const diferenca = lida - previsto
+    if (Math.abs(diferenca) < 0.6) {
+      marco.value = { posicao: previsto + diferenca / 2, em, tocando }
+      return
+    }
+  }
+  marco.value = { posicao: lida, em, tocando }
+}
 const posicaoAoVivo = computed(() => {
-  const p = estado.value?.posicao || 0
-  return estado.value?.estado === 'PLAYING' ? p + Math.min(5, (agora.value - lidoEm.value) / 1000) : p
+  const m = marco.value
+  if (!m) return 0
+  return m.tocando ? m.posicao + Math.min(5, Math.max(0, agora.value - m.em) / 1000) : m.posicao
 })
 
 let relogioDoEstado
@@ -41,8 +59,9 @@ let relogioDaLegenda
 async function lerEstado() {
   if (document.visibilityState !== 'visible') return
   try {
-    estado.value = await api(`/api/telas/${encodeURIComponent(props.id)}/estado`, { tempo: 6000 })
-    lidoEm.value = Date.now()
+    const e = await api(`/api/telas/${encodeURIComponent(props.id)}/estado`, { tempo: 6000 })
+    acertarRelogio(e, Date.now())
+    estado.value = e
     erro.value = ''
   } catch (e) {
     erro.value = e.message
@@ -144,7 +163,7 @@ onMounted(() => {
   carregarTelas()
   lerEstado()
   relogioDoEstado = setInterval(lerEstado, 1500)
-  relogioDaLegenda = setInterval(() => (agora.value = Date.now()), 250)
+  relogioDaLegenda = setInterval(() => (agora.value = Date.now()), 100)
   document.addEventListener('visibilitychange', lerEstado)
 })
 

@@ -3,8 +3,9 @@ import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } fr
 import { api } from './api.js'
 import { enderecoDaLegenda, falaAtual, lerVTT } from './legendas.js'
 
-// A legenda passando no celular enquanto o vídeo toca na tela (S31). A fala atual fica no meio, em
-// destaque; as de antes continuam ali para dar tempo de tocar. Tocar numa fala a escolhe (tocar na
+// A legenda passando no celular enquanto o vídeo toca na tela (S31). A fala que está na tela agora
+// fica no meio, em destaque; entre uma fala e outra, nenhuma fica em destaque e a próxima já espera
+// no meio. As de antes continuam ali para dar tempo de tocar. Tocar numa fala a escolhe (tocar na
 // vizinha junta as duas, para a frase cortada ao meio) e "Mandar para o Flashcards" vira cartão no
 // baralho Inglês, traduzido pelo Claude. Rolar com o dedo solta a legenda até "Voltar ao ponto".
 const props = defineProps({
@@ -24,6 +25,13 @@ const seguindo = ref(true)
 const lista = ref(null)
 
 const atual = computed(() => falaAtual(falas.value, props.posicao))
+// Na tela agora: a última que começou, se ainda não acabou.
+const ativa = computed(() => {
+  const f = falas.value[atual.value]
+  return f && props.posicao < f.fim ? atual.value : -1
+})
+// No meio da lista: a fala na tela ou, no intervalo, a próxima.
+const centro = computed(() => (ativa.value >= 0 ? ativa.value : Math.min(atual.value + 1, falas.value.length - 1)))
 const podeMandar = computed(() => flashcards.value && (legenda.value?.idioma || '').startsWith('en'))
 
 let marca = ''
@@ -46,13 +54,18 @@ async function carregar() {
   }
 }
 
+// Pela posição na tela (e não por offsetTop, que conta a partir de outro elemento).
 function centralizar(suave = true) {
-  const el = lista.value?.querySelector(`[data-i="${Math.max(0, atual.value)}"]`)
-  if (!el || !lista.value) return
-  lista.value.scrollTo({ top: el.offsetTop - lista.value.clientHeight / 2 + el.clientHeight / 2, behavior: suave ? 'smooth' : 'auto' })
+  const caixa = lista.value
+  const el = caixa?.querySelector(`[data-i="${Math.max(0, centro.value)}"]`)
+  if (!el) return
+  const a = caixa.getBoundingClientRect()
+  const b = el.getBoundingClientRect()
+  const top = caixa.scrollTop + (b.top - a.top) - (a.height - b.height) / 2
+  caixa.scrollTo({ top, behavior: suave ? 'smooth' : 'auto' })
 }
 
-watch(atual, () => seguindo.value && nextTick(centralizar))
+watch(centro, () => seguindo.value && nextTick(centralizar))
 watch(falas, (f) => {
   emit('falas', f.length > 0)
   nextTick(() => centralizar(false))
@@ -132,7 +145,8 @@ onBeforeUnmount(() => clearInterval(relogio))
         :key="i"
         :data-i="i"
         class="fala"
-        :class="{ atual: i === atual, passada: i < atual, escolhida: escolhidas.includes(i) }"
+        :class="{ atual: i === ativa, passada: i < centro && i !== ativa, escolhida: escolhidas.includes(i) }"
+        :aria-current="i === ativa ? 'true' : null"
         @click="tocar(i)"
       >
         {{ f.texto }}
@@ -158,9 +172,9 @@ onBeforeUnmount(() => clearInterval(relogio))
 }
 
 .falas {
-  height: 210px;
+  height: 240px;
   margin: 0;
-  padding: 80px 4px;
+  padding: 100px 4px;
   overflow-y: auto;
   list-style: none;
   border-radius: var(--raio);
@@ -170,10 +184,10 @@ onBeforeUnmount(() => clearInterval(relogio))
 }
 
 .fala {
-  padding: 6px 10px;
+  padding: 8px 12px;
   border-radius: var(--raio-p);
-  color: var(--texto-fraco);
-  font-size: 0.95rem;
+  color: var(--texto-suave);
+  font-size: 1rem;
   line-height: 1.4;
   white-space: pre-line;
   cursor: pointer;
@@ -181,13 +195,15 @@ onBeforeUnmount(() => clearInterval(relogio))
 }
 
 .fala.passada {
-  color: var(--texto-suave);
+  color: var(--texto-fraco);
 }
 
+/* A fala na tela agora: mesmo tamanho das outras (a lista não pula), mas inconfundível. */
 .fala.atual {
+  background: var(--superficie-forte);
+  box-shadow: inset 3px 0 0 var(--marca);
   color: var(--texto);
-  font-size: 1.05rem;
-  font-weight: 600;
+  font-weight: 650;
 }
 
 .fala.escolhida {

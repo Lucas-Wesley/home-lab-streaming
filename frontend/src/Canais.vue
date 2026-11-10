@@ -10,9 +10,12 @@ import { diaDoJogo, faseDoJogo, hora, nomeDoCanal, ordenarJogos } from './jogos.
 // Canais (S33): primeiro os jogos do dia, pela agenda do ge, com o canal da assinatura que passa
 // cada um (ou o grupo da emissora, ou o site, se não está na assinatura); depois os canais de
 // esporte, um por linha, com o que passa agora. O resto dos canais fica em "Todos os canais".
+// A ESPN e a FotMob conferem o ge (S34); quando uma delas falha, só um ícone pequeno avisa.
 const jogos = ref([])
 const hoje = ref('')
 const erroDaAgenda = ref('')
+const servicos = ref([])
+const verServicos = ref(false)
 const grupos = ref([])
 const erro = ref('')
 const carregando = ref(true)
@@ -29,6 +32,14 @@ const diaEscolhido = computed(() => dia.value || hoje.value)
 const doDia = computed(() => ordenarJogos(jogos.value.filter((j) => j.dia === diaEscolhido.value)))
 const proximo = computed(() => jogos.value.find((j) => j.dia > diaEscolhido.value))
 const esportes = computed(() => grupos.value.filter((g) => g.principal))
+const falhas = computed(() => servicos.value.filter((s) => !s.ok))
+const PAPEL = { ge: 'os jogos e os canais', espn: 'confere horário e placar', fotmob: 'completa os canais' }
+
+function estadoDoServico(s) {
+  if (s.ok) return 'Funcionando'
+  if (s.mudou) return 'Mudou o formato: o leitor precisa ser atualizado'
+  return s.lida_em ? `Sem resposta; usando a leitura das ${hora(s.lida_em)}` : 'Sem resposta'
+}
 
 function abrirCanal(c) {
   grupoAberto.value = null
@@ -45,7 +56,8 @@ async function carregarJogos() {
     const r = await api('/api/jogos', { tempo: 40000 })
     jogos.value = r.jogos
     hoje.value = r.hoje
-    erroDaAgenda.value = r.erro || ''
+    erroDaAgenda.value = ''
+    servicos.value = r.servicos || []
   } catch (e) {
     erroDaAgenda.value = e.status === 0 ? '' : e.message
   }
@@ -83,6 +95,15 @@ onBeforeUnmount(() => clearInterval(relogio))
     <section class="jogos" aria-labelledby="titulo-jogos">
       <div class="cabeca">
         <h2 id="titulo-jogos">Jogos</h2>
+        <button
+          v-if="falhas.length"
+          class="alerta"
+          :title="`Fonte com problema: ${falhas.map((s) => s.nome).join(', ')}`"
+          aria-label="Fontes dos jogos com problema"
+          @click="verServicos = true"
+        >
+          <Icone nome="alerta" />
+        </button>
         <div v-if="dias.length > 1" class="pilulas" role="tablist">
           <button
             v-for="d in dias"
@@ -106,6 +127,8 @@ onBeforeUnmount(() => clearInterval(relogio))
               <span v-if="j.momento === 'ao_vivo'" class="ao-vivo"><span class="ponto"></span>Ao vivo</span>
               <span v-else-if="j.momento === 'encerrado'" class="fim">Encerrado</span>
               <span v-else class="hora">{{ j.hora || 'A definir' }}</span>
+              <Icone v-if="j.confirmado_por?.length && !j.divergencia" nome="confirmado" class="confirmado" :title="`Confirmado: ${j.confirmado_por.join(', ')}`" />
+              <span v-if="j.divergencia" class="divergencia">{{ j.divergencia }}</span>
             </div>
             <div class="partida">
               <p class="campeonato">{{ j.campeonato }}<template v-if="faseDoJogo(j)"> · {{ faseDoJogo(j) }}</template></p>
@@ -137,7 +160,8 @@ onBeforeUnmount(() => clearInterval(relogio))
           </li>
         </ul>
         <div v-else class="sem-jogos">
-          <p>Nenhum jogo {{ diaEscolhido === hoje ? 'hoje' : 'neste dia' }} nos campeonatos acompanhados.</p>
+          <p v-if="!jogos.length && falhas.length === servicos.length && servicos.length">As agendas dos jogos não responderam agora.</p>
+          <p v-else>Nenhum jogo {{ diaEscolhido === hoje ? 'hoje' : 'neste dia' }} nos campeonatos acompanhados.</p>
           <p v-if="proximo" class="suave">
             Próximo: <strong>{{ proximo.mandante.nome }} x {{ proximo.visitante.nome }}</strong>,
             {{ diaDoJogo(proximo.dia, hoje).toLowerCase() }}{{ proximo.hora ? ` às ${proximo.hora}` : '' }}
@@ -167,6 +191,16 @@ onBeforeUnmount(() => clearInterval(relogio))
     </section>
 
     <a class="botao todos" href="#/canais/todos">Todos os canais<Icone nome="avancar" /></a>
+
+    <Folha v-if="verServicos" titulo="Fontes dos jogos" @fechar="verServicos = false">
+      <ul class="lista servicos">
+        <li v-for="s in servicos" :key="s.id" :class="{ falhou: !s.ok }">
+          <span class="nome">{{ s.nome }} <span class="suave">· {{ PAPEL[s.id] }}</span></span>
+          <span class="estado">{{ estadoDoServico(s) }}</span>
+          <span v-if="s.erro" class="suave detalhe">{{ s.erro }}</span>
+        </li>
+      </ul>
+    </Folha>
 
     <Folha v-if="grupoAberto" :titulo="grupoAberto.nome" @fechar="grupoAberto = null">
       <p class="suave dica">O guia não diz em qual canal {{ grupoAberto.nome }} está o jogo: escolha um.</p>
@@ -214,6 +248,29 @@ onBeforeUnmount(() => clearInterval(relogio))
   margin: 0;
   font-size: 1.15rem;
   font-weight: 650;
+}
+
+.alerta {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  margin-left: -10px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: color-mix(in srgb, var(--marca) 70%, var(--texto-fraco));
+  cursor: pointer;
+}
+
+.alerta svg {
+  width: 16px;
+  height: 16px;
+}
+
+.alerta:hover {
+  background: var(--superficie);
 }
 
 .pilulas {
@@ -290,6 +347,46 @@ onBeforeUnmount(() => clearInterval(relogio))
   50% {
     opacity: 0.3;
   }
+}
+
+.quando {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 4px;
+  align-items: center;
+}
+
+.confirmado {
+  width: 13px;
+  height: 13px;
+  color: var(--texto-fraco);
+  opacity: 0.7;
+}
+
+.divergencia {
+  flex-basis: 100%;
+  color: color-mix(in srgb, var(--marca) 75%, var(--texto-fraco));
+  font-size: 0.68rem;
+  font-weight: 500;
+  line-height: 1.3;
+}
+
+.servicos li {
+  display: grid;
+  gap: 2px;
+  padding: 10px 0;
+}
+
+.servicos .estado {
+  font-size: 0.85rem;
+}
+
+.servicos .falhou .estado {
+  color: var(--marca);
+}
+
+.servicos .detalhe {
+  font-size: 0.78rem;
 }
 
 .fim {

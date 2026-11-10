@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -67,7 +66,7 @@ var gruposDeCanais = []grupoDeCanais{
 	{ID: "premiere", Nome: "Premiere", padrao: regexp.MustCompile(`^premiere\b`), fontes: []string{"premiere"}, principal: true, guia: true},
 	// A Globo de São Paulo, que é a que o Lucas assiste.
 	{ID: "globo", Nome: "Globo", padrao: regexp.MustCompile(`^globo sp: sao paulo\b`), fontes: []string{"globo", "tv globo"}, guia: true},
-	{ID: "disney", Nome: "Disney+", padrao: regexp.MustCompile(`^disney\+: canal`), fontes: []string{"disney+", "disney plus"}, tambem: []string{"espn"}},
+	{ID: "disney", Nome: "Disney+", padrao: regexp.MustCompile(`^disney\+: canal`), fontes: []string{"disney+", "disney plus", "disney+ premium"}, tambem: []string{"espn"}},
 	{ID: "prime", Nome: "Prime Video", padrao: regexp.MustCompile(`^prime video: canal`), fontes: []string{"prime video", "amazon prime video"}},
 	{ID: "hbo", Nome: "HBO Max", padrao: regexp.MustCompile(`^hbo max: canal`), fontes: []string{"hbo max", "max"}},
 	{ID: "dazn", Nome: "DAZN", padrao: regexp.MustCompile(`^dazn: canal`), fontes: []string{"dazn"}},
@@ -82,6 +81,14 @@ func grupoDaFonte(nome string) (grupoDeCanais, bool) {
 	for _, g := range gruposDeCanais {
 		for _, f := range g.fontes {
 			if n == f {
+				return g, true
+			}
+		}
+	}
+	// "ESPN 2", "SporTV 3", "Disney+ Premium" (a FotMob diz o canal): o grupo pelo começo do nome.
+	for _, g := range gruposDeCanais {
+		for _, f := range g.fontes {
+			if strings.HasPrefix(n, f+" ") {
 				return g, true
 			}
 		}
@@ -419,35 +426,21 @@ type jogo struct {
 	Momento    string        `json:"momento"` // antes, ao_vivo ou encerrado
 	Fontes     []fonteDoJogo `json:"fontes"`
 	Pagina     string        `json:"pagina,omitempty"`
-	inicio     time.Time
-	fontesDoGe []struct{ nome, link string }
+	// As outras fontes (S34): quem mais tem o jogo no mesmo horário, e o que diz diferente.
+	ConfirmadoPor []string `json:"confirmado_por,omitempty"`
+	Divergencia   string   `json:"divergencia,omitempty"`
+	inicio        time.Time
+	transmissoes  []transmissao
+	apelidos      [2][]string // outros nomes dos times (a ESPN em inglês), para achar o jogo na FotMob
+	adiado        bool
 }
 
-type agendaDosJogos struct {
-	mu     sync.Mutex
-	jogos  []jogo
-	lidaEm time.Time
-	erro   string
-}
-
-var clienteDoGe = &http.Client{Timeout: 20 * time.Second}
+// transmissao é onde a fonte diz que o jogo passa, ainda sem ligar aos canais da assinatura.
+type transmissao struct{ nome, link string }
 
 // lerAgendaDoGe baixa a página da agenda e tira dela os jogos dos campeonatos escolhidos.
 func lerAgendaDoGe(ctx context.Context, endereco string) ([]jogo, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endereco, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36")
-	resp, err := clienteDoGe.Do(req)
-	if err != nil {
-		return nil, errors.New("a agenda do ge não respondeu")
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("a agenda do ge respondeu %d", resp.StatusCode)
-	}
-	corpo, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
+	corpo, err := baixarDaFonte(ctx, "a agenda do ge", endereco)
 	if err != nil {
 		return nil, err
 	}
@@ -457,11 +450,11 @@ func lerAgendaDoGe(ctx context.Context, endereco string) ([]jogo, error) {
 func jogosDaPagina(pagina string) ([]jogo, error) {
 	loc := reAgendaDoGe.FindStringIndex(pagina)
 	if loc == nil {
-		return nil, errors.New("a agenda do ge mudou: os jogos não estão mais na página")
+		return nil, fonteMudou{errors.New("a agenda do ge mudou: os jogos não estão mais na página")}
 	}
 	var agenda agendaDoGe
 	if err := json.NewDecoder(strings.NewReader(pagina[loc[1]:])).Decode(&agenda); err != nil {
-		return nil, fmt.Errorf("a agenda do ge mudou: %v", err)
+		return nil, fonteMudou{fmt.Errorf("a agenda do ge mudou: %v", err)}
 	}
 	vistos := map[int64]bool{}
 	var jogos []jogo
@@ -554,7 +547,7 @@ func jogoDoGe(p *partidaDoGe, campeonato, momento string) jogo {
 		}
 	}
 	for _, f := range p.LiveWatchSources {
-		j.fontesDoGe = append(j.fontesDoGe, struct{ nome, link string }{f.Name, f.URL})
+		j.transmissoes = append(j.transmissoes, transmissao{f.Name, f.URL})
 	}
 	return j
 }
@@ -577,7 +570,7 @@ var sitesDasFontes = map[string]string{
 var palavrasComuns = map[string]bool{
 	"atletico": true, "clube": true, "club": true, "sport": true, "esporte": true, "futebol": true, "real": true,
 	"fc": true, "ec": true, "sc": true, "ac": true, "de": true, "do": true, "da": true, "united": true, "city": true,
-	"sao": true, "santa": true, "racing": true, "deportivo": true, "independiente": true,
+	"sao": true, "santa": true, "racing": true, "deportivo": true, "independiente": true, "time": true,
 }
 
 var reSeparadores = regexp.MustCompile(`[^a-z0-9]+`)
@@ -636,7 +629,7 @@ func ligarAosCanais(jogos []jogo, grupos []grupoComCanais) {
 		j := &jogos[ji]
 		j.Fontes = []fonteDoJogo{}
 		var deFora []fonteDoJogo
-		for _, f := range j.fontesDoGe {
+		for _, f := range j.transmissoes {
 			nome := primeiro(nomesDasFontes[normalizar(f.nome)], f.nome)
 			g, ok := grupoDaFonte(f.nome)
 			gc := porID[g.ID]
@@ -658,6 +651,15 @@ func ligarAosCanais(jogos []jogo, grupos []grupoComCanais) {
 						}
 					}
 					if fonte.Canal != nil {
+						break
+					}
+				}
+			}
+			// A fonte já diz o canal ("ESPN 2"): o desse nome no grupo.
+			if fonte.Canal == nil {
+				for _, c := range gc.Canais {
+					if c.chave == normalizar(strings.TrimSpace(f.nome)) {
+						fonte.Canal = &canalDoJogo{ID: c.ID, Nome: c.Nome, Capa: c.Capa}
 						break
 					}
 				}
@@ -698,27 +700,8 @@ func validadeDaAgenda(jogos []jogo, agora time.Time) time.Duration {
 	return 30 * time.Minute
 }
 
-func (a *app) jogosDaAgenda(ctx context.Context) ([]jogo, time.Time, string) {
-	ag := &a.agenda
-	ag.mu.Lock()
-	defer ag.mu.Unlock()
-	agora := a.agora()
-	if ag.lidaEm.IsZero() || agora.Sub(ag.lidaEm) >= validadeDaAgenda(ag.jogos, agora) {
-		jogos, err := lerAgendaDoGe(ctx, urlDaAgenda())
-		if err != nil {
-			ag.erro = err.Error()
-			if ag.lidaEm.IsZero() || agora.Sub(ag.lidaEm) > 5*time.Minute {
-				ag.lidaEm = agora.Add(-validadeDaAgenda(ag.jogos, agora) + time.Minute) // tenta de novo em 1 min
-			}
-		} else {
-			ag.jogos, ag.lidaEm, ag.erro = jogos, agora, ""
-		}
-	}
-	return append([]jogo(nil), ag.jogos...), ag.lidaEm, ag.erro
-}
-
 func (a *app) handleJogos(w http.ResponseWriter, r *http.Request) {
-	jogos, lidaEm, erro := a.jogosDaAgenda(r.Context())
+	jogos, servicos, lidaEm, erro := a.jogosDasFontes(r.Context())
 	grupos, err := a.gruposComCanais(r.Context())
 	if err != nil {
 		falha(w, err)
@@ -727,7 +710,7 @@ func (a *app) handleJogos(w http.ResponseWriter, r *http.Request) {
 	// O guia só dos grupos que aparecem nos jogos.
 	quais := map[string]bool{}
 	for _, j := range jogos {
-		for _, f := range j.fontesDoGe {
+		for _, f := range j.transmissoes {
 			if g, ok := grupoDaFonte(f.nome); ok {
 				quais[g.ID] = true
 				for _, t := range g.tambem {
@@ -741,7 +724,7 @@ func (a *app) handleJogos(w http.ResponseWriter, r *http.Request) {
 	if jogos == nil {
 		jogos = []jogo{}
 	}
-	resp := map[string]any{"hoje": a.agora().In(fusoDeBrasilia).Format("2006-01-02"), "jogos": jogos, "erro": erro}
+	resp := map[string]any{"hoje": a.agora().In(fusoDeBrasilia).Format("2006-01-02"), "jogos": jogos, "erro": erro, "servicos": servicos}
 	if !lidaEm.IsZero() {
 		resp["lida_em"] = lidaEm.UTC().Format(time.RFC3339)
 	}

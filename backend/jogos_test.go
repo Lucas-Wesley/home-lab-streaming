@@ -200,3 +200,141 @@ func TestBaseDoCanal(t *testing.T) {
 		}
 	}
 }
+
+// espnFalsa imita o placar da ESPN, liga por liga; sem "lang", os nomes em inglês. quebrada: a liga
+// que responde 400 (mudou de endereço).
+func espnFalsa(t *testing.T, quebrada string) string {
+	t.Helper()
+	evento := func(id int, a, b, data, estado, status, ga, gb string) string {
+		return fmt.Sprintf(`{"id":"%d","date":%q,"competitions":[{"competitors":[
+			{"homeAway":"home","score":%q,"team":{"displayName":%q,"logo":"https://exemplo.invalid/%d-a.png"}},
+			{"homeAway":"away","score":%q,"team":{"displayName":%q,"logo":"https://exemplo.invalid/%d-b.png"}}],
+			"status":{"type":{"name":%q,"state":%q}}}]}`, id, data, ga, a, id, gb, b, id, status, estado)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		liga := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/"), "/scoreboard")
+		if liga == quebrada {
+			http.Error(w, `{"code":400}`, http.StatusBadRequest)
+			return
+		}
+		if r.URL.Query().Get("dates") != "203003" {
+			t.Errorf("mês pedido: %q", r.URL.RawQuery)
+		}
+		emIngles := r.URL.Query().Get("lang") == ""
+		var eventos []string
+		switch liga {
+		case "bra.copa_do_brazil":
+			eventos = append(eventos, evento(8001, "Time Azul", "Time Verde", "2030-03-04T22:00Z", "in", "STATUS_FIRST_HALF", "3", "1"))
+		case "eng.1":
+			eventos = append(eventos, evento(8002, "Time Vermelho", "Time Branco", "2030-03-05T01:00Z", "pre", "STATUS_SCHEDULED", "0", "0"))
+		case "bra.1":
+			a, b := "Time Amarelo", "Time Preto"
+			if emIngles {
+				a, b = "Yellow Team", "Black Team"
+			}
+			eventos = append(eventos, evento(9001, a, b, "2030-03-06T19:00Z", "pre", "STATUS_SCHEDULED", "0", "0"),
+				evento(9002, "Time Laranja", "Time Marrom", "2030-03-06T19:00Z", "pre", "STATUS_POSTPONED", "0", "0"))
+		case "fifa.friendly":
+			eventos = append(eventos, evento(9003, "Brasil", "Seleção Inventada", "2030-03-07T19:00Z", "pre", "STATUS_SCHEDULED", "0", "0"),
+				evento(9004, "Seleção Uma", "Seleção Outra", "2030-03-07T19:00Z", "pre", "STATUS_SCHEDULED", "0", "0"))
+		}
+		fmt.Fprintf(w, `{"leagues":[],"events":[%s]}`, strings.Join(eventos, ","))
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL + "/"
+}
+
+// fotmobFalsa imita o guia de TV: os jogos no meio dos dados da página, com os nomes em inglês.
+func fotmobFalsa(t *testing.T, pagina string) string {
+	t.Helper()
+	if pagina == "" {
+		pagina = `<html><script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{"fallback":{"tvguide:br/20300306":[
+			{"key":1,"matches":[{"id":1,"utcTime":"2030-03-06T19:00:00.000Z","home":{"id":1,"name":"Yellow Team"},"away":{"id":2,"name":"Black Team"},
+				"leagueName":"Série A","channels":[{"name":"ESPN 4"},{"name":"Canal a confirmar"}],"isLive":false}]},
+			{"key":2,"matches":[{"id":2,"utcTime":"2030-03-04T22:00:00.000Z","home":{"id":3,"name":"Time Azul"},"away":{"id":4,"name":"Time Verde"},
+				"channels":[{"name":"Premiere"}],"isLive":true}]}]}}}}</script></html>`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, pagina) }))
+	t.Cleanup(srv.Close)
+	return srv.URL
+}
+
+type respostaDosJogos struct {
+	Erro     string            `json:"erro"`
+	Jogos    []jogo            `json:"jogos"`
+	Servicos []servicoDosJogos `json:"servicos"`
+}
+
+// A ESPN confere o horário e o placar e traz o jogo que o ge não tem; a FotMob diz o canal dele.
+func TestAgendasJuntas(t *testing.T) {
+	e := ambienteDosJogos(t)
+	t.Setenv("ESPN_URL", espnFalsa(t, ""))
+	t.Setenv("FOTMOB_URL", fotmobFalsa(t, ""))
+	var r respostaDosJogos
+	e.json(t, "/api/jogos", &r)
+	for _, s := range r.Servicos {
+		if !s.OK || s.Erro != "" || s.LidaEm == "" {
+			t.Fatalf("serviço %+v", s)
+		}
+	}
+	var nomes []string
+	for _, j := range r.Jogos {
+		nomes = append(nomes, j.Mandante.Nome)
+	}
+	// O adiado e o amistoso sem a Seleção ficam de fora; nada repetido.
+	if strings.Join(nomes, ",") != "Time Azul,Time Vermelho,Time Amarelo,Brasil" {
+		t.Fatalf("jogos: %v", nomes)
+	}
+	copa := r.Jogos[0]
+	if copa.Placar == nil || copa.Placar.Mandante != 3 || strings.Join(copa.ConfirmadoPor, ",") != "ESPN,FotMob" || len(copa.Fontes) != 2 || copa.Divergencia != "" {
+		t.Fatalf("copa (placar da ESPN, canais do ge): %+v", copa)
+	}
+	if p := r.Jogos[1]; p.Divergencia != "Na ESPN: 22:00" || len(p.ConfirmadoPor) != 0 || p.Hora != "21:30" {
+		t.Fatalf("horário diferente: %+v", p)
+	}
+	so := r.Jogos[2]
+	if so.ID != -9001 || so.Campeonato != "Campeonato Brasileiro Série A" || so.Dia != "2030-03-06" || so.Hora != "16:00" || so.Mandante.Escudo == "" ||
+		strings.Join(so.ConfirmadoPor, ",") != "FotMob" || len(so.Fontes) != 1 || so.Fontes[0].Canal == nil || so.Fontes[0].Canal.ID != 510 {
+		t.Fatalf("jogo só da ESPN, canal pela FotMob: %+v", so)
+	}
+	if b := r.Jogos[3]; strings.Join(b.ConfirmadoPor, ",") != "ESPN" {
+		t.Fatalf("seleção: %+v", b)
+	}
+}
+
+// Sem o ge, os jogos vêm da ESPN; cada serviço diz se não respondeu ou se mudou de formato.
+func TestServicosQueFalharam(t *testing.T) {
+	e := ambienteDosJogos(t)
+	t.Setenv("AGENDA_URL", "http://127.0.0.1:1/")
+	t.Setenv("ESPN_URL", espnFalsa(t, "eng.1"))
+	t.Setenv("FOTMOB_URL", fotmobFalsa(t, "<html>outra página</html>"))
+	var r respostaDosJogos
+	e.json(t, "/api/jogos", &r)
+	quer := map[string][2]bool{"ge": {false, false}, "espn": {false, true}, "fotmob": {false, true}}
+	for _, s := range r.Servicos {
+		if q := quer[s.ID]; s.OK != q[0] || s.Mudou != q[1] || s.Erro == "" {
+			t.Errorf("serviço %+v", s)
+		}
+	}
+	if r.Erro == "" || len(r.Jogos) != 3 || r.Jogos[0].Mandante.Nome != "Time Azul" {
+		t.Fatalf("sem o ge: %+v", r)
+	}
+}
+
+func TestMesmoTime(t *testing.T) {
+	for _, c := range []struct {
+		a, b string
+		quer bool
+	}{
+		{"Vasco", "Vasco da Gama", true},
+		{"Athletic Club", "Athletic", true},
+		{"Operário-PR", "Operário PR", true},
+		{"Sport", "Sport Recife", true},
+		{"Atlético-MG", "Atlético-GO", false},
+		{"São Paulo", "São Bernardo", false},
+	} {
+		if got := mesmoTime(c.a, c.b); got != c.quer {
+			t.Errorf("mesmoTime(%q, %q) = %v", c.a, c.b, got)
+		}
+	}
+}

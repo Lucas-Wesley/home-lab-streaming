@@ -63,7 +63,7 @@ type app struct {
 	legendasAcordar   chan struct{}
 	liberarMu         sync.Mutex
 	liberarParaOAudio map[string]bool
-	// Jogos do dia (S33): a agenda do ge e o guia dos canais, guardados por um tempo.
+	// Jogos do dia (S33, S34): as agendas (ge, ESPN, FotMob) e o guia dos canais, guardados por um tempo.
 	agenda   agendaDosJogos
 	guias    guiasDosCanais
 	sincMu   sync.Mutex

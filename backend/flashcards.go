@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -16,7 +18,8 @@ import (
 // numa fala (ou em duas seguidas, quando a frase foi cortada) manda para o app Flashcards, no baralho
 // "Inglês", com a frase em inglês na frente e a tradução no verso. O Claude limpa a fala (traço de
 // diálogo, ♪, [sons]) e traduz pelo sentido da cena; o Flashcards só recebe o cartão pronto, pela API
-// dele (POST /api/notas). Sem FLASHCARDS_URL ou sem o Claude, o botão não aparece.
+// dele (POST /api/notas). Sem FLASHCARDS_URL ou sem o Claude, o botão não aparece. O pedido só entra
+// na fila: o servidor responde na hora e faz os cartões um por vez, sem avisar o celular depois.
 
 func urlDoFlashcards() string { return strings.TrimRight(env("FLASHCARDS_URL", ""), "/") }
 
@@ -30,11 +33,8 @@ func (a *app) handleFlashcardsDisponivel(w http.ResponseWriter, r *http.Request)
 
 const esquemaDoCartao = `{"type":"object","properties":{"ingles":{"type":"string"},"traducao":{"type":"string"},"nota":{"type":"string"}},"required":["ingles","traducao","nota"]}`
 
-type cartaoDaLegenda struct {
-	ID     string `json:"id"`
-	Frente string `json:"frente"`
-	Verso  string `json:"verso"`
-}
+// filaDeCartoes deixa um cartão por vez com o Claude.
+var filaDeCartoes sync.Mutex
 
 func (a *app) handleMandarParaOFlashcards(w http.ResponseWriter, r *http.Request) {
 	var corpo struct {
@@ -64,13 +64,26 @@ func (a *app) handleMandarParaOFlashcards(w http.ResponseWriter, r *http.Request
 			fonte = "https://www.themoviedb.org/" + tiposDoTMDB[m[1]] + "/" + m[2]
 		}
 	}
+	go func() {
+		filaDeCartoes.Lock()
+		defer filaDeCartoes.Unlock()
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		if err := a.fazerCartao(ctx, frase, titulo, fonte, corpo.Antes, corpo.Depois); err != nil {
+			log.Printf("flashcards: %q: %v", frase, err)
+		}
+	}()
+	writeJSON(w, http.StatusAccepted, map[string]string{"estado": "na fila"})
+}
 
+// fazerCartao pede ao Claude a frase limpa e a tradução e cria a nota no Flashcards.
+func (a *app) fazerCartao(ctx context.Context, frase, titulo, fonte string, antes, depois []string) error {
 	var pedido strings.Builder
 	fmt.Fprintf(&pedido, "O Lucas está aprendendo inglês vendo um vídeo%s com legenda em inglês. Ele tocou nesta fala para virar "+
 		"flashcard (a frase em inglês na frente, a tradução no verso).\n\nFala escolhida:\n%s\n\n", entreParenteses(titulo), frase)
-	if len(corpo.Antes)+len(corpo.Depois) > 0 {
+	if len(antes)+len(depois) > 0 {
 		fmt.Fprintf(&pedido, "Contexto, só para entender a cena (não entra no cartão):\nAntes:\n%s\nDepois:\n%s\n\n",
-			strings.Join(ultimas(corpo.Antes, 4), "\n"), strings.Join(corpo.Depois[:min(2, len(corpo.Depois))], "\n"))
+			strings.Join(ultimas(antes, 4), "\n"), strings.Join(depois[:min(2, len(depois))], "\n"))
 	}
 	pedido.WriteString("Devolva:\n" +
 		"- ingles: a fala escolhida numa linha só, com as mesmas palavras, sem traço de diálogo, sem nome de quem fala, sem ♪ " +
@@ -78,16 +91,16 @@ func (a *app) handleMandarParaOFlashcards(w http.ResponseWriter, r *http.Request
 		"escolhidas, junte as partes.\n" +
 		"- traducao: uma tradução natural em português do Brasil, fiel ao sentido nesta cena.\n" +
 		"- nota: se a fala tem expressão idiomática, gíria ou phrasal verb, uma explicação curta (uma frase, em português); senão, vazio.\n")
-	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
-	defer cancel()
 	var c struct {
 		Ingles   string `json:"ingles"`
 		Traducao string `json:"traducao"`
 		Nota     string `json:"nota"`
 	}
-	if err := a.perguntarAoClaude(ctx, pedido.String(), esquemaDoCartao, "", &c); err != nil || strings.TrimSpace(c.Ingles) == "" || strings.TrimSpace(c.Traducao) == "" {
-		erroJSON(w, http.StatusBadGateway, "O Claude não traduziu a fala. Tente de novo.")
-		return
+	if err := a.perguntarAoClaude(ctx, pedido.String(), esquemaDoCartao, "", &c); err != nil {
+		return err
+	}
+	if strings.TrimSpace(c.Ingles) == "" || strings.TrimSpace(c.Traducao) == "" {
+		return errors.New("o Claude não traduziu a fala")
 	}
 	verso := strings.TrimSpace(c.Traducao)
 	if n := strings.TrimSpace(c.Nota); n != "" {
@@ -95,31 +108,10 @@ func (a *app) handleMandarParaOFlashcards(w http.ResponseWriter, r *http.Request
 	}
 	baralho, err := a.baralhoDeIngles(ctx)
 	if err != nil {
-		erroJSON(w, http.StatusBadGateway, err.Error())
-		return
-	}
-	var criada struct {
-		ID string `json:"id"`
+		return err
 	}
 	nota := map[string]string{"baralho_id": baralho, "tipo": "basico", "frente": strings.TrimSpace(c.Ingles), "verso": verso, "tags": "streaming", "fonte": fonte}
-	if err := a.pedirAoFlashcards(ctx, http.MethodPost, "/api/notas", nota, &criada); err != nil {
-		erroJSON(w, http.StatusBadGateway, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusCreated, cartaoDaLegenda{ID: criada.ID, Frente: nota["frente"], Verso: verso})
-}
-
-// handleDesfazerFlashcard apaga o cartão que acabou de ir ("Desfazer" no aviso).
-func (a *app) handleDesfazerFlashcard(w http.ResponseWriter, r *http.Request) {
-	if !flashcardsDisponivel() {
-		erroJSON(w, http.StatusConflict, "O Flashcards não está ligado neste servidor.")
-		return
-	}
-	if err := a.pedirAoFlashcards(r.Context(), http.MethodDelete, "/api/notas/"+r.PathValue("id"), nil, nil); err != nil {
-		erroJSON(w, http.StatusBadGateway, err.Error())
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
+	return a.pedirAoFlashcards(ctx, http.MethodPost, "/api/notas", nota, nil)
 }
 
 // baralhoDeIngles acha o baralho "Inglês" pelo nome (sem acento nem maiúscula); se não houver, cria.

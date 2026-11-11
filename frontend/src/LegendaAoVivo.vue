@@ -95,7 +95,7 @@ async function mandar() {
   mandando.value = true
   try {
     const f = falas.value
-    const c = await api('/api/flashcards', {
+    await api('/api/flashcards', {
       metodo: 'POST',
       corpo: {
         chave: props.chave,
@@ -103,23 +103,13 @@ async function mandar() {
         antes: f.slice(Math.max(0, e[0] - 4), e[0]).map((x) => x.texto),
         depois: f.slice(e[e.length - 1] + 1, e[e.length - 1] + 3).map((x) => x.texto),
       },
-      tempo: 100000,
     })
     escolhidas.value = []
-    recado(`No Flashcards: “${c.verso.split('\n')[0]}”`, false, { rotulo: 'Desfazer', fazer: () => desfazer(c.id) })
+    recado('Mandado para o Flashcards.')
   } catch (err) {
     recado(err.message, true)
   } finally {
     mandando.value = false
-  }
-}
-
-async function desfazer(id) {
-  try {
-    await api(`/api/flashcards/${id}`, { metodo: 'DELETE' })
-    recado('Cartão tirado do Flashcards.')
-  } catch (err) {
-    recado(err.message, true)
   }
 }
 
@@ -156,7 +146,7 @@ onBeforeUnmount(() => clearInterval(relogio))
       <button v-if="!seguindo" class="botao" @click="voltarAoPonto">Voltar ao ponto</button>
       <template v-if="escolhidas.length">
         <button v-if="podeMandar" class="botao principal" :disabled="mandando" @click="mandar">
-          {{ mandando ? 'Traduzindo…' : escolhidas.length > 1 ? `Mandar as ${escolhidas.length} falas para o Flashcards` : 'Mandar para o Flashcards' }}
+          {{ mandando ? 'Mandando…' : escolhidas.length > 1 ? `Mandar as ${escolhidas.length} falas para o Flashcards` : 'Mandar para o Flashcards' }}
         </button>
         <button class="botao" :disabled="mandando" @click="escolhidas = []">Cancelar</button>
       </template>

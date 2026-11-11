@@ -8,9 +8,10 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
-// flashcardsFalso imita a API do app Flashcards: baralhos, criar e apagar nota.
+// flashcardsFalso imita a API do app Flashcards: baralhos e criar nota.
 type flashcardsFalso struct {
 	mu       sync.Mutex
 	baralhos []map[string]string
@@ -48,16 +49,26 @@ func novoFlashcardsFalso(t *testing.T, baralhos ...string) *flashcardsFalso {
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(n)
 	})
-	mux.HandleFunc("DELETE /api/notas/{id}", func(w http.ResponseWriter, r *http.Request) {
-		f.mu.Lock()
-		defer f.mu.Unlock()
-		delete(f.notas, r.PathValue("id"))
-		w.WriteHeader(http.StatusNoContent)
-	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	t.Setenv("FLASHCARDS_URL", srv.URL)
 	return f
+}
+
+// nota espera o cartão feito em segundo plano.
+func (f *flashcardsFalso) nota(t *testing.T, id string) map[string]string {
+	t.Helper()
+	for i := 0; i < 100; i++ {
+		f.mu.Lock()
+		n := f.notas[id]
+		f.mu.Unlock()
+		if n != nil {
+			return n
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("a nota %s não chegou ao Flashcards", id)
+	return nil
 }
 
 func TestFalaDaLegendaParaOFlashcards(t *testing.T) {
@@ -76,23 +87,18 @@ func TestFalaDaLegendaParaOFlashcards(t *testing.T) {
 	status, corpo := e.pedir(t, "POST", "/api/flashcards", map[string]any{
 		"chave": "filme:200", "falas": []string{"- We're not", "cooking anymore."}, "antes": []string{"Jesse, listen."}, "depois": []string{"What?"},
 	})
-	if status != http.StatusCreated {
+	// Responde na hora; o cartão fica pronto depois.
+	if status != http.StatusAccepted {
 		t.Fatalf("%d %s", status, corpo)
 	}
+	n := f.nota(t, "n0")
 	pedido := args()
 	if !strings.Contains(pedido, "- We're not\ncooking anymore.") || !strings.Contains(pedido, "Jesse, listen.") || !strings.Contains(pedido, "Missão Explosiva") {
 		t.Fatalf("pedido ao Claude:\n%s", pedido)
 	}
-	f.mu.Lock()
-	n := f.notas["n0"]
-	f.mu.Unlock()
 	// Vai para o baralho que já existe (o nome comparado sem acento nem maiúscula).
 	if n["baralho_id"] != "b1" || n["frente"] != "We're not cooking anymore." || n["verso"] != "A gente não vai mais cozinhar.\n\n\"Cook\" aqui é gíria para fabricar droga." || n["tags"] != "streaming" {
 		t.Fatalf("nota: %v", n)
-	}
-	// Desfazer apaga o cartão.
-	if status, _ := e.pedir(t, "DELETE", "/api/flashcards/n0", nil); status != http.StatusNoContent || len(f.notas) != 0 {
-		t.Fatalf("desfazer: %d %v", status, f.notas)
 	}
 }
 
@@ -100,10 +106,13 @@ func TestBaralhoDeInglesCriadoQuandoNaoHa(t *testing.T) {
 	e := novoAmbiente(t)
 	f := novoFlashcardsFalso(t, "Bandeiras")
 	claudeFalso(t, `{"ingles":"Say my name.","traducao":"Diga o meu nome.","nota":""}`)
-	if status, corpo := e.pedir(t, "POST", "/api/flashcards", map[string]any{"falas": []string{"Say my name."}}); status != http.StatusCreated {
+	if status, corpo := e.pedir(t, "POST", "/api/flashcards", map[string]any{"falas": []string{"Say my name."}}); status != http.StatusAccepted {
 		t.Fatalf("%d %s", status, corpo)
 	}
-	if len(f.baralhos) != 2 || f.baralhos[1]["nome"] != "Inglês" || f.notas["n0"]["baralho_id"] != "b1" || f.notas["n0"]["verso"] != "Diga o meu nome." {
+	n := f.nota(t, "n0")
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.baralhos) != 2 || f.baralhos[1]["nome"] != "Inglês" || n["baralho_id"] != "b1" || n["verso"] != "Diga o meu nome." {
 		t.Fatalf("baralhos %v, notas %v", f.baralhos, f.notas)
 	}
 }

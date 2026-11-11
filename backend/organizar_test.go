@@ -229,3 +229,53 @@ func TestOndeAssistir(t *testing.T) {
 		t.Fatalf("logo: %q", lista[0].Logo)
 	}
 }
+
+// Busca aos poucos (S36): uma linha por busca feita em cada indexador, com o andamento; o indexador
+// com a tag "cloudflare" faz só as duas primeiras buscas, e a segunda vez vem das buscas guardadas.
+func TestTorrentsAosPoucos(t *testing.T) {
+	e := novoAmbiente(t)
+	t.Setenv("TMDB_URL", tmdbFalso(t).URL)
+	var buscas []string
+	falso := prowlarrFalso(t, nil, &buscas)
+	e.pedir(t, "PUT", "/api/prowlarr", configDoProwlarr{URL: falso.URL, Chave: chaveFalsa})
+	e.pedir(t, "PUT", "/api/tmdb", map[string]string{"chave": "0123456789abcdef0123456789abcdef"})
+
+	ler := func() []parteDaBusca {
+		status, corpo := e.pedir(t, "GET", "/api/titulos/serie/1396/torrents/aos-poucos?temporada=1&episodio=2", nil)
+		if status != 200 {
+			t.Fatalf("aos poucos: %d %s", status, corpo)
+		}
+		var partes []parteDaBusca
+		for _, l := range strings.Split(strings.TrimSpace(corpo), "\n") {
+			var p parteDaBusca
+			if err := json.Unmarshal([]byte(l), &p); err != nil {
+				t.Fatalf("linha %q: %v", l, err)
+			}
+			partes = append(partes, p)
+		}
+		return partes
+	}
+	partes := ler()
+	// Um: episódio, temporada e "season 1"; Dois (lento): só as duas primeiras.
+	if len(partes) != 6 || partes[0].Total != 5 || partes[0].Torrents != nil || partes[5].Feitas != 5 || partes[5].Torrents == nil {
+		t.Fatalf("partes: %+v", partes)
+	}
+	porIndexador := map[string]int{}
+	for _, b := range buscas {
+		if strings.Contains(b, "indexerIds=3") {
+			t.Fatal("buscou no indexador desligado")
+		}
+		for _, id := range []string{"1", "2"} {
+			if strings.Contains(b, "indexerIds="+id) {
+				porIndexador[id]++
+			}
+		}
+	}
+	if porIndexador["1"] != 3 || porIndexador["2"] != 2 || !strings.Contains(strings.Join(buscas, " "), "query=Breaking+Bad+S01E02") {
+		t.Fatalf("buscas: %v", buscas)
+	}
+	antes := len(buscas)
+	if partes := ler(); len(partes) != 6 || len(buscas) != antes {
+		t.Fatalf("a segunda vez devia vir das buscas guardadas: %d partes, %d buscas novas", len(partes), len(buscas)-antes)
+	}
+}

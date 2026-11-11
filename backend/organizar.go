@@ -294,17 +294,7 @@ func (a *app) procurarVarias(ctx context.Context, c configDoProwlarr, buscas []s
 	if len(erros) == len(buscas) && len(erros) > 0 {
 		return nil, erros[0]
 	}
-	// O mesmo lançamento pode vir das duas buscas.
-	vistos := map[string]bool{}
-	unicos := todos[:0]
-	for _, r := range todos {
-		chave := r.Indexador + "|" + r.Titulo + "|" + strconv.FormatInt(r.Tamanho, 10)
-		if !vistos[chave] {
-			vistos[chave] = true
-			unicos = append(unicos, r)
-		}
-	}
-	return unicos, nil
+	return semRepetir(todos), nil
 }
 
 func organizar(t tituloDoTMDB, resultados []resultadoDaBusca, buscas []string, agora time.Time) torrentsDoTitulo {

@@ -15,9 +15,11 @@ const erro = ref('')
 
 onMounted(async () => {
   try {
-    filme.value = await api(`/api/filmes/${props.id}`, { tempo: 20000 })
-    // Conhecido no TMDB: a página do título junta a assinatura e as versões de torrent (S28).
-    if (filme.value.detalhes?.tmdb) location.replace(`#/titulo/filme/${filme.value.detalhes.tmdb}`)
+    const f = await api(`/api/filmes/${props.id}`, { tempo: 20000 })
+    // Conhecido no TMDB: a página do título junta a assinatura e as versões de torrent (S28). Vai
+    // direto, sem desenhar esta antes (a tela piscava).
+    if (f.detalhes?.tmdb) location.replace(`#/titulo/filme/${f.detalhes.tmdb}`)
+    else filme.value = f
   } catch (e) {
     erro.value = e.status === 0 ? 'Sem conexão: o Streaming só abre na rede de casa.' : e.message
   }

@@ -30,7 +30,9 @@ func prowlarrFalso(t *testing.T, ficha []byte, buscas *[]string) *httptest.Serve
 		}
 		switch r.URL.Path {
 		case "/api/v1/indexer":
-			fmt.Fprint(w, `[{"enable":true},{"enable":true},{"enable":false}]`)
+			fmt.Fprint(w, `[{"id":1,"name":"Um","enable":true,"tags":[]},{"id":2,"name":"Dois","enable":true,"tags":[7]},{"id":3,"name":"Desligado","enable":false}]`)
+		case "/api/v1/tag":
+			fmt.Fprint(w, `[{"id":7,"label":"cloudflare"}]`)
 		case "/api/v1/search":
 			mu.Lock()
 			*buscas = append(*buscas, r.URL.RawQuery)

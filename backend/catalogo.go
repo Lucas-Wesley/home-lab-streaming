@@ -352,6 +352,15 @@ func (a *app) handleItens(w http.ResponseWriter, r *http.Request) {
 		falha(w, err)
 		return
 	}
+	// Já conhecido no TMDB: a capa abre direto a página do título (S28), sem passar pela do catálogo.
+	if tipo != "canal" {
+		a.tmdbDosItens(r.Context(), lista)
+		for i, it := range lista {
+			if it.tmdb > 0 {
+				lista[i].Pagina = fmt.Sprintf("#/titulo/%s/%d", tipo, it.tmdb)
+			}
+		}
+	}
 	writeJSON(w, http.StatusOK, lista)
 }
 

@@ -35,12 +35,14 @@ function escolherTemporada(t) {
 
 async function carregar(atualizar = false) {
   try {
-    serie.value = await api(`/api/series/${props.id}${atualizar ? '?atualizar' : ''}`, { tempo: 30000 })
-    // Conhecida no TMDB: a página do título junta a assinatura e as versões de torrent (S28).
-    if (serie.value.tmdb && !atualizar) {
-      location.replace(`#/titulo/serie/${serie.value.tmdb}`)
+    const s = await api(`/api/series/${props.id}${atualizar ? '?atualizar' : ''}`, { tempo: 30000 })
+    // Conhecida no TMDB: a página do título junta a assinatura e as versões de torrent (S28). Vai
+    // direto, sem desenhar esta antes (a tela piscava).
+    if (s.tmdb && !atualizar) {
+      location.replace(`#/titulo/serie/${s.tmdb}`)
       return
     }
+    serie.value = s
     const guardada = Number(lembrar(`temporada-${props.id}`))
     temporada.value = temporadas.value.includes(guardada) ? guardada : proximo.value?.temporada || temporadas.value[0] || 0
   } catch (e) {

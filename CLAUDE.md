@@ -3,7 +3,7 @@
 App do **ecossistema de apps pessoais do Lucas**: central de streaming (canais, filmes e séries de uma assinatura
 IPTV) com o celular como controle remoto da TV e do projetor.
 
-**Comece lendo:** [`docs/DECISOES.md`](docs/DECISOES.md) — estado atual, decisões (S1–S34) e próximos passos.
+**Comece lendo:** [`docs/DECISOES.md`](docs/DECISOES.md) — estado atual, decisões (S1–S36) e próximos passos.
 
 ## Em uma frase
 O servidor guarda o acesso e o catálogo, repassa o vídeo do provedor (para o PWA em `/api/video`, para as telas em
@@ -29,7 +29,8 @@ Mesma infraestrutura e mesmo design system (`docs/DESIGN-SYSTEM.md`) das outras 
   SSDP passa pelo procurador (`procurador.go`): não mandar SSDP direto, usar `buscarLocais`.
 - **Busca de torrents e legendas** (S19–S21): Prowlarr, TMDB e OpenSubtitles pela API, com endereço e chaves no banco
   (`ajustes`), nunca no código. A chave do Prowlarr não vai ao navegador (`semChave`) nem aparece em erros. Nos testes, `prowlarrFalso`,
-  `tmdbFalso` e `openSubtitlesFalso`.
+  `tmdbFalso` e `openSubtitlesFalso`. A página do título busca aos poucos, indexador por indexador (S36, `aos_poucos.go`):
+  os indexadores com a tag `cloudflare` (FlareSolverr) fazem uma busca por vez e só as duas primeiras.
 - **Whisper, Parakeet, Claude e Flashcards** (S26, S27, S29, S31): opcionais; sem `WHISPER_URL`, `PARAKEET_URL`,
   `FLASHCARDS_URL` ou o programa `claude`, as etapas são puladas. Nos testes, `novoAmbiente` desliga todos (o Claude
   de verdade gastaria a assinatura; o Flashcards de verdade ganharia cartões): use `whisperFalso`, `parakeetFalso`,

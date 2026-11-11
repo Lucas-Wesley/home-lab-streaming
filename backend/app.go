@@ -52,6 +52,8 @@ type app struct {
 	motor     *motor
 	downloads *downloads
 	tmdb      cacheDoTMDB
+	// Busca aos poucos (S36): os indexadores do Prowlarr, as vagas de cada um e as buscas guardadas.
+	porIndexador buscaPorIndexador
 	// Verificações (S23): o servidor interno que o ffprobe lê, e até 3 verificações ao mesmo tempo.
 	interno struct {
 		once sync.Once

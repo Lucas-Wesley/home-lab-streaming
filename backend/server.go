@@ -71,6 +71,7 @@ func newServer(a *app, web fs.FS, version string) http.Handler {
 	mux.HandleFunc("GET /api/titulos", a.handleBuscarTitulos)
 	mux.HandleFunc("GET /api/titulos/{tipo}/{id}", a.handleTitulo)
 	mux.HandleFunc("GET /api/titulos/{tipo}/{id}/torrents", a.handleTorrentsDoTitulo)
+	mux.HandleFunc("GET /api/titulos/{tipo}/{id}/torrents/aos-poucos", a.handleTorrentsAosPoucos)
 	mux.HandleFunc("GET /api/titulos/{tipo}/{id}/onde", a.handleOndeAssistir)
 	mux.HandleFunc("GET /api/titulos/serie/{id}/temporada/{temporada}", a.handleTemporadaDoTitulo)
 	mux.HandleFunc("PUT /api/prowlarr", a.handleGuardarProwlarr)

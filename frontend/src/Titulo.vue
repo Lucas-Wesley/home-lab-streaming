@@ -1,39 +1,44 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import Andamento from './Andamento.vue'
 import BotaoFavorito from './BotaoFavorito.vue'
 import Folha from './Folha.vue'
 import Icone from './Icone.vue'
 import OpcaoDaAssinatura from './OpcaoDaAssinatura.vue'
 import OpcaoDeTorrent from './OpcaoDeTorrent.vue'
-import { api, lembrar } from './api.js'
+import { aosPoucos, api, lembrar } from './api.js'
 import { tamanho } from './tamanho.js'
 import { ajusteDaVerificacao, carregarVerificacoes, recomendavel, verificacoes, verificar } from './verificacoes.js'
 import { voltar } from './voltar.js'
 
 // Um filme ou série do TMDB e onde assisti-lo (S20, S28): a assinatura primeiro, se tiver, e os
-// torrents organizados: versões do filme; na série, só os episódios, temporada por temporada (os
-// pacotes da temporada ou da série ficam de fora). Abrir um episódio mostra a assinatura e as versões
-// avulsas dele; com poucas, busca pelo episódio ("Nome S02E05"). A melhor versão vem marcada.
+// torrents organizados: versões do filme; na série, só os episódios avulsos (os pacotes da temporada
+// ou da série ficam de fora). A melhor versão vem marcada. A busca chega aos poucos, indexador por
+// indexador (S36): o filme busca ao abrir; a série mostra temporadas e episódios na hora (TMDB e
+// assinatura) e só busca o episódio que for aberto, com a temporada dele ("Nome S02E05", "Nome S02").
 const props = defineProps({ param: { type: String, required: true } })
 const [tipo, id] = props.param.split('/')
 
 const titulo = ref(null)
 const assinatura = ref([])
 const erro = ref('')
-const geral = ref(null) // torrents da busca pelo título
-const daTemporada = ref({}) // número → torrents da busca por aquela temporada
+const geral = ref(null) // torrents do filme, com o que já chegou
 const procurando = ref(false)
+const andamento = ref({ feitas: 0, total: 0, falharam: [] }) // da busca do filme
 const erroDosTorrents = ref('')
 const temporada = ref(0)
 const episodios = ref({}) // número da temporada → episódios do TMDB
-const daEpisodio = ref({}) // "temporada:número" → torrents da busca por aquele episódio
-const procurandoEpisodio = ref(false)
+const daEpisodio = ref({}) // "temporada:número" → torrents da busca por aquele episódio (e a temporada)
+const buscaDoEpisodio = ref({}) // "temporada:número" → { feitas, total, falharam, fim, erro }
 const numeroAberto = ref(0) // episódio com a folha aberta
 const verTodas = ref({}) // seção → mostrar as opções escondidas
 const filmesDaAssinatura = ref([]) // { id, nome, capa, posicao }
 const episodiosDaAssinatura = ref({}) // "temporada:número" → episódio do provedor
 const downloads = ref({}) // chave → download da assinatura
 const outrosServicos = ref([]) // Netflix, HBO Max… que têm o título (S30)
+const carregandoAssinatura = ref(false)
+const saindo = new AbortController() // a página fechou: as buscas param
+onBeforeUnmount(() => saindo.abort())
 
 const POUCAS = 3
 
@@ -61,7 +66,7 @@ function juntar(...listas) {
   return todas
 }
 
-const fontes = (n) => [geral.value, daTemporada.value[n], ...Object.entries(daEpisodio.value).filter(([k]) => k.startsWith(`${n}:`)).map(([, r]) => r)].filter(Boolean)
+const fontes = (n) => [geral.value, ...Object.entries(daEpisodio.value).filter(([k]) => k.startsWith(`${n}:`)).map(([, r]) => r)].filter(Boolean)
 const organizadaDe = (fonte, n) => (fonte.temporadas || []).find((s) => s.numero === n)
 function episodiosComTorrent(n) {
   const porEpisodio = {}
@@ -105,7 +110,7 @@ function detalhesDoEpisodio(e) {
   if (e.duracao) partes.push(`${e.duracao} min`)
   if (aindaNaoSaiu(e)) partes.push(`estreia em ${dataCurta(e.data)}`)
   else if (e.opcoes.length) partes.push(`${e.opcoes.length} ${e.opcoes.length === 1 ? 'versão' : 'versões'} de torrent`)
-  else if (!e.assinatura) partes.push('toque para procurar')
+  else if (!e.assinatura && !daEpisodio.value[`${temporada.value}:${e.numero}`]) partes.push('toque para procurar')
   return partes.join(' · ')
 }
 
@@ -114,6 +119,7 @@ const rotuloDoEpisodio = (e) => `${titulo.value?.titulo} · T${temporada.value} 
 // O que a assinatura tem deste título: o filme (com onde parou) ou os episódios da série.
 async function carregarAssinatura() {
   if (!assinatura.value.length) return
+  carregandoAssinatura.value = true
   try {
     downloads.value = Object.fromEntries((await api('/api/assinatura/downloads')).map((d) => [d.chave, d]))
   } catch {
@@ -139,12 +145,13 @@ async function carregarAssinatura() {
       }
     }
   }
+  carregandoAssinatura.value = false
 }
 
 const visiveis = (secao, ops) => (verTodas.value[secao] ? ops : ops.filter((o) => !o.pesado).slice(0, POUCAS))
 const escondidas = (secao, ops) => ops.length - visiveis(secao, ops).length
 
-const buscasFeitas = computed(() => [...(geral.value?.buscas || []), ...(daTemporada.value[temporada.value]?.buscas || [])])
+const buscasFeitas = computed(() => geral.value?.buscas || [])
 const nenhumTorrent = computed(() => !ehSerie && geral.value && !versoes.value.length && !outros.value.length)
 
 // As verificações já feitas vêm junto; as melhores opções ainda não verificadas são verificadas
@@ -156,6 +163,14 @@ function chavesDe(r) {
   const ops = [...(r.versoes || []), ...(r.completas || []), ...(r.outros || [])]
   for (const s of r.temporadas || []) ops.push(...s.pacotes, ...Object.values(s.episodios).flat())
   return ops.map((o) => o.chave)
+}
+
+// As verificações já feitas das opções que acabaram de chegar (cada parte da busca traz algumas novas).
+const conferidas = new Set()
+function carregarNovas(r) {
+  const novas = chavesDe(r).filter((k) => !conferidas.has(k))
+  novas.forEach((k) => conferidas.add(k))
+  return carregarVerificacoes(novas)
 }
 
 function autoVerificar() {
@@ -182,15 +197,24 @@ watch(
   () => autoVerificar(),
 )
 
-async function buscarTorrents(n = 0) {
+// Filme: as versões aparecem conforme cada indexador responde; as verificações automáticas, no fim.
+async function buscarTorrents() {
   procurando.value = true
   erroDosTorrents.value = ''
   try {
-    const r = await api(`/api/titulos/${tipo}/${id}/torrents${n ? `?temporada=${n}` : ''}`, { tempo: 100000 })
-    if (n) daTemporada.value = { ...daTemporada.value, [n]: r }
-    else geral.value = r
-    await carregarVerificacoes(chavesDe(r))
-    if (!ehSerie || n) autoVerificar()
+    await aosPoucos(
+      `/api/titulos/${tipo}/${id}/torrents/aos-poucos`,
+      (p) => {
+        andamento.value = p
+        if (p.torrents) {
+          geral.value = p.torrents
+          carregarNovas(p.torrents)
+        }
+      },
+      { sinal: saindo.signal },
+    )
+    geral.value ??= { versoes: [], outros: [] } // nenhum indexador ligado
+    autoVerificar()
   } catch (e) {
     erroDosTorrents.value = e.message
   } finally {
@@ -198,25 +222,35 @@ async function buscarTorrents(n = 0) {
   }
 }
 
-// Abrir um episódio: as duas melhores versões avulsas são verificadas; com poucas, busca por ele.
+// Abrir um episódio: a assinatura já está na folha; os torrents dele chegam aos poucos. A busca
+// traz a temporada junto, então os outros episódios dela também ganham opções. No fim, as duas
+// melhores versões avulsas são verificadas.
 async function abrirEpisodio(e) {
   numeroAberto.value = e.numero
   const n = temporada.value
   const k = `${n}:${e.numero}`
-  if (e.opcoes.length < POUCAS && !daEpisodio.value[k]) {
-    procurandoEpisodio.value = true
+  if (!daEpisodio.value[k] && !buscaDoEpisodio.value[k]) {
+    buscaDoEpisodio.value = { ...buscaDoEpisodio.value, [k]: { feitas: 0, total: 0, falharam: [] } }
     try {
-      const r = await api(`/api/titulos/${tipo}/${id}/torrents?temporada=${n}&episodio=${e.numero}`, { tempo: 100000 })
-      daEpisodio.value = { ...daEpisodio.value, [k]: r }
-      await carregarVerificacoes(chavesDe(r))
-    } catch {
-      daEpisodio.value = { ...daEpisodio.value, [k]: { temporadas: [] } }
-    } finally {
-      procurandoEpisodio.value = false
+      await aosPoucos(
+        `/api/titulos/${tipo}/${id}/torrents/aos-poucos?temporada=${n}&episodio=${e.numero}`,
+        (p) => {
+          buscaDoEpisodio.value = { ...buscaDoEpisodio.value, [k]: p }
+          if (p.torrents) {
+            daEpisodio.value = { ...daEpisodio.value, [k]: p.torrents }
+            carregarNovas(p.torrents)
+          }
+        },
+        { sinal: saindo.signal },
+      )
+    } catch (erro) {
+      buscaDoEpisodio.value = { ...buscaDoEpisodio.value, [k]: { ...buscaDoEpisodio.value[k], erro: erro.message } }
     }
+    daEpisodio.value = { ...daEpisodio.value, [k]: daEpisodio.value[k] || { temporadas: [] } }
+    buscaDoEpisodio.value = { ...buscaDoEpisodio.value, [k]: { ...buscaDoEpisodio.value[k], fim: true } }
   }
   const aberto = episodioAberto.value
-  if (!aberto || temporada.value !== n) return
+  if (!aberto || temporada.value !== n || aberto.numero !== e.numero) return
   for (const o of aberto.opcoes.filter((o) => !o.pesado).slice(0, 2)) {
     if (!verificacoes[o.chave] && !pedidas.has(o.chave)) {
       pedidas.add(o.chave)
@@ -224,6 +258,11 @@ async function abrirEpisodio(e) {
     }
   }
 }
+
+const buscaAberta = computed(() => (episodioAberto.value ? buscaDoEpisodio.value[`${temporada.value}:${episodioAberto.value.numero}`] : null))
+const procurandoEpisodio = computed(() => !!buscaAberta.value && !buscaAberta.value.fim)
+// Cada busca em cada indexador conta uma; o mais lento (o que passa pelo FlareSolverr) fica por último.
+const porcento = (a) => (a?.total ? Math.round((100 * a.feitas) / a.total) : 0)
 
 async function carregarEpisodios(n) {
   if (episodios.value[n]) return
@@ -234,13 +273,10 @@ async function carregarEpisodios(n) {
   }
 }
 
-// Abrir uma temporada busca também por ela ("Nome S02"): nomes curtos se perdem na busca geral.
 watch(temporada, (n) => {
   if (!n) return
   lembrar(`temporada-tmdb:${id}`, String(n))
   carregarEpisodios(n)
-  if (!daTemporada.value[n]) buscarTorrents(n)
-  else autoVerificar()
 })
 
 const meta = computed(() => {
@@ -268,8 +304,8 @@ onMounted(async () => {
   api(`/api/titulos/${tipo}/${id}/onde`, { tempo: 20000 })
     .then((l) => (outrosServicos.value = l))
     .catch(() => {})
-  await buscarTorrents()
-  if (ehSerie && temporadas.value.length) {
+  if (!ehSerie) buscarTorrents()
+  else if (temporadas.value.length) {
     const lembrada = Number(lembrar(`temporada-tmdb:${id}`))
     temporada.value = temporadas.value.some((s) => s.numero === lembrada) ? lembrada : temporadas.value[0].numero
   }
@@ -320,11 +356,12 @@ onMounted(async () => {
         </ul>
         <button v-if="escondidas('versoes', versoes)" class="mais" @click="verTodas.versoes = true">Mostrar mais {{ escondidas('versoes', versoes) }}</button>
       </template>
-      <p v-if="procurando && !geral" class="vazio">Procurando nos indexadores…</p>
-      <p v-else-if="nenhumTorrent && !procurando" class="vazio">Nenhum torrent deste título nos indexadores.</p>
+      <Andamento v-if="procurando" :porcento="porcento(andamento)" :primeira="!geral" />
+      <p v-else-if="nenhumTorrent" class="vazio">Nenhum torrent deste título nos indexadores.</p>
+      <p v-if="!procurando && andamento.falharam.length" class="suave nota">Sem resposta de {{ andamento.falharam.join(', ') }}.</p>
 
-      <!-- Série -->
-      <template v-if="ehSerie && (geral || erroDosTorrents)">
+      <!-- Série: a estrutura vem do TMDB e da assinatura, sem esperar os indexadores -->
+      <template v-if="ehSerie">
         <div v-if="temporadas.length" class="pilulas" role="tablist">
           <button
             v-for="s in temporadas"
@@ -339,7 +376,7 @@ onMounted(async () => {
           </button>
         </div>
 
-        <p class="rotulo">Episódios <span v-if="procurando" class="procurando">procurando…</span></p>
+        <p class="rotulo">Episódios</p>
         <ul class="lista episodios">
           <li v-for="e in listaDeEpisodios" :key="e.numero">
             <button class="episodio" :disabled="aindaNaoSaiu(e)" @click="abrirEpisodio(e)">
@@ -359,7 +396,7 @@ onMounted(async () => {
             </button>
           </li>
         </ul>
-        <p v-if="!listaDeEpisodios.length && !procurando" class="vazio">Sem episódios nesta temporada.</p>
+        <p v-if="!listaDeEpisodios.length && episodios[temporada]" class="vazio">Sem episódios nesta temporada.</p>
       </template>
 
       <template v-if="outros.length">
@@ -395,8 +432,11 @@ onMounted(async () => {
       <button v-if="escondidas(`ep${temporada}:${episodioAberto.numero}`, episodioAberto.opcoes)" class="mais" @click="verTodas[`ep${temporada}:${episodioAberto.numero}`] = true">
         Mostrar mais {{ escondidas(`ep${temporada}:${episodioAberto.numero}`, episodioAberto.opcoes) }}
       </button>
-      <p v-if="procurandoEpisodio" class="vazio">Procurando este episódio nos indexadores…</p>
-      <p v-else-if="!episodioAberto.opcoes.length && !episodioAberto.assinatura" class="vazio">Nenhuma versão avulsa deste episódio nos indexadores.</p>
+      <p v-if="carregandoAssinatura && !episodioAberto.assinatura" class="suave nota">Conferindo a assinatura…</p>
+      <Andamento v-if="procurandoEpisodio" :porcento="porcento(buscaAberta)" :primeira="!episodioAberto.opcoes.length" />
+      <p v-else-if="buscaAberta?.erro" class="aviso erro">{{ buscaAberta.erro }}</p>
+      <p v-else-if="!episodioAberto.opcoes.length && !episodioAberto.assinatura && daEpisodio[`${temporada}:${episodioAberto.numero}`]" class="vazio">Nenhuma versão avulsa deste episódio nos indexadores.</p>
+      <p v-if="!procurandoEpisodio && buscaAberta?.falharam.length" class="suave nota">Sem resposta de {{ buscaAberta.falharam.join(', ') }}.</p>
     </Folha>
   </div>
 </template>
@@ -435,6 +475,8 @@ onMounted(async () => {
 
 .cartaz {
   width: 100%;
+  aspect-ratio: 2 / 3;
+  object-fit: cover;
   border-radius: var(--raio);
   background: var(--superficie);
 }
@@ -551,14 +593,6 @@ h1 {
 
 .pilula {
   flex: none;
-}
-
-.procurando {
-  margin-left: 8px;
-  color: var(--texto-fraco);
-  font-weight: 400;
-  letter-spacing: normal;
-  text-transform: none;
 }
 
 .episodio {

@@ -35,9 +35,16 @@ test('do acesso colado até a página da série', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Tirar dos favoritos' })).toBeVisible()
 
   // Série: o próximo episódio e a lista, com o título limpo.
+  // Vinda de uma lista rolada, a página da série abre no topo.
   await page.goto('/#/series')
-  await page.getByText('Série de Teste').click()
+  await page.evaluate(() => {
+    document.body.style.minHeight = '5000px'
+    window.scrollTo(0, 2000)
+  })
+  await page.getByText('Série de Teste').evaluate((el) => el.click()) // sem rolar até o item
   await expect(page.getByText('T1 E1 · O começo')).toBeVisible() // o próximo a ver
+  expect(await page.evaluate(() => window.scrollY)).toBe(0)
+  await page.evaluate(() => (document.body.style.minHeight = ''))
   await expect(page.getByRole('button', { name: /O começo/ })).toBeVisible()
   await page.getByRole('button', { name: /O meio/ }).click()
   await expect(page.getByRole('dialog')).toContainText('T1 E2')

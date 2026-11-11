@@ -56,8 +56,15 @@ function ir(destino) {
 }
 
 const telaAnterior = ref('')
+const caminhoDe = (h) => h.split('?')[0]
 function aoMudarHash() {
   if (location.hash.startsWith('#/ajustes') && !hash.value.startsWith('#/ajustes')) telaAnterior.value = hash.value || '#/inicio'
+  // Tela nova começa no topo; a rolagem da lista de onde se veio não vale para ela. No "voltar",
+  // a entrada já foi vista e o navegador devolve a posição de antes.
+  if (caminhoDe(location.hash) !== caminhoDe(hash.value) && !history.state?.vista) {
+    window.scrollTo(0, 0)
+    history.replaceState({ ...history.state, vista: true }, '')
+  }
   hash.value = location.hash
 }
 

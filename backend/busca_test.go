@@ -52,6 +52,28 @@ func TestJuntarCatalogoETMDB(t *testing.T) {
 	}
 }
 
+// "Terror" de 2018 no catálogo é "The Terror", não a série "Terror" ainda sem estreia (sem ano).
+func TestCasaComOTituloPeloAno(t *testing.T) {
+	terror := item{Tipo: "serie", ID: 1, Nome: "Terror", Ano: "2018"}
+	casos := []struct {
+		t    tituloDoTMDB
+		casa bool
+	}{
+		{tituloDoTMDB{Tipo: "serie", ID: 320207, Titulo: "Terror"}, false},
+		{tituloDoTMDB{Tipo: "serie", ID: 75191, Titulo: "The Terror", Ano: "2018"}, true},
+		{tituloDoTMDB{Tipo: "serie", ID: 2, Titulo: "The Terror", Ano: "2024"}, false},
+	}
+	for _, c := range casos {
+		if got := casaComOTitulo(c.t, terror); got != c.casa {
+			t.Errorf("%d: %v, queria %v", c.t.ID, got, c.casa)
+		}
+	}
+	// Sem ano no catálogo, o nome exato basta, mas o "The" não sai.
+	if !casaComOTitulo(tituloDoTMDB{Titulo: "Terror"}, item{Nome: "Terror"}) || casaComOTitulo(tituloDoTMDB{Titulo: "The Terror", Ano: "2018"}, item{Nome: "Terror"}) {
+		t.Error("sem ano no catálogo")
+	}
+}
+
 func TestBuscaDoInicioComTorrents(t *testing.T) {
 	e := novoAmbiente(t)
 	e.a.db.Exec(`INSERT INTO itens (tipo, id, nome, busca, categoria_id, ano, ordem) VALUES

@@ -108,11 +108,18 @@ func casaComSubtitulo(t tituloDoTMDB, it item) bool {
 }
 
 // casaComOTitulo: o nome do catálogo é o título (em português ou o original) e, depois, só ano ou
-// marcações ("[L]", "(4K)"); com ano dos dois lados, a diferença é de no máximo 1.
+// marcações ("[L]", "(4K)"). Com ano no catálogo, o TMDB tem de ter ano também, a no máximo 1 de
+// diferença: um título sem ano no TMDB é anúncio, quase nunca o do catálogo ("Terror" de 2018 não é
+// a série "Terror" ainda sem estreia). Com o ano batendo, o catálogo pode tirar o "The" do começo
+// ("Terror" de 2018 é "The Terror").
 func casaComOTitulo(t tituloDoTMDB, it item) bool {
 	nome := comparavel(it.Nome)
 	for _, n := range []string{t.Titulo, t.Original} {
 		c := comparavel(n)
+		semThe := false
+		if c != "" && !strings.HasPrefix(nome, c) && strings.HasPrefix(c, "the ") {
+			c, semThe = c[len("the "):], true
+		}
 		if c == "" || !strings.HasPrefix(nome, c) {
 			continue
 		}
@@ -121,10 +128,15 @@ func casaComOTitulo(t tituloDoTMDB, it item) bool {
 			continue
 		}
 		ano := primeiro(it.Ano, reAno.FindString(resto))
-		if ano != "" && t.Ano != "" && absInt(atoi(ano)-atoi(t.Ano)) > 1 {
+		if (ano != "" || semThe) && !anosBatem(ano, t.Ano) {
 			continue
 		}
 		return true
 	}
 	return false
+}
+
+// anosBatem: os dois anos existem e a diferença é de no máximo 1.
+func anosBatem(doCatalogo, doTMDB string) bool {
+	return doCatalogo != "" && doTMDB != "" && absInt(atoi(doCatalogo)-atoi(doTMDB)) <= 1
 }

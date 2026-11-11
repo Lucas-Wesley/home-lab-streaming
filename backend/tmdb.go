@@ -418,7 +418,7 @@ func (a *app) naAssinatura(ctx context.Context, t tituloDoTMDB) []itemDaAssinatu
 			if resto != "" && !reRestoDoCatalogo.MatchString(resto) {
 				continue
 			}
-			if it.Ano != "" && t.Ano != "" && absInt(atoi(it.Ano)-atoi(t.Ano)) > 1 {
+			if it.Ano != "" && !anosBatem(it.Ano, t.Ano) {
 				continue
 			}
 			vistos[it.ID] = true

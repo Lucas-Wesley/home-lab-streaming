@@ -14,6 +14,7 @@ services:
       - "8081:8081"
     volumes:
       - ./data:/data
+    # No servidor, a conta do Claude vem do Hub (tela Claude, H11 do Hub; ver compose.prod.yaml). No Mac,
     # CLAUDE_CODE_OAUTH_TOKEN (gerado com "claude setup-token") fica no .env, fora do Git (S27).
     env_file:
       - path: .env

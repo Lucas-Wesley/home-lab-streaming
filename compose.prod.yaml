@@ -20,10 +20,13 @@ services:
       PROCURADOR_DE_TELAS: http://host.docker.internal:8452
       # Avisos no celular (S35): o ntfy do homelab (homelab/ntfy), tópico "streaming".
       NTFY_URL: http://ntfy/streaming
+      CLAUDE_TOKEN_ARQUIVO: /claude/token
     extra_hosts:
       - host.docker.internal:host-gateway
     volumes:
       - /srv/data/streaming:/data
+      # A conta do Claude escolhida no Hub (H11 do Hub), lida a cada chamada; só leitura.
+      - /srv/data/claude/ativa:/claude:ro
     networks:
       - proxy
 

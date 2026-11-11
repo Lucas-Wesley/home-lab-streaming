@@ -51,6 +51,7 @@ func (a *app) perguntarAoClaude(ctx context.Context, pedido, esquema, pastaDeLei
 		dir = pastaDeLeitura
 	}
 	cmd := exec.CommandContext(ctx, programaClaude(), args...)
+	cmd.Env = ambienteDoClaude()
 	cmd.Dir = dir
 	var saida, erros bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &saida, &erros
@@ -68,7 +69,7 @@ func (a *app) perguntarAoClaude(ctx context.Context, pedido, esquema, pastaDeLei
 	if r.Erro || errExec != nil {
 		msg := primeiraLinhaDe(r.Resultado, primeiraLinhaDe(erros.String(), "erro sem mensagem"))
 		if strings.Contains(msg, "Not logged in") || strings.Contains(msg, "/login") {
-			return errors.New("o Claude não está autenticado neste servidor (falta o CLAUDE_CODE_OAUTH_TOKEN)")
+			return errors.New("o Claude recusou o login: troque o token ou a conta no Hub, na tela Claude")
 		}
 		return fmt.Errorf("o Claude falhou: %s", msg)
 	}

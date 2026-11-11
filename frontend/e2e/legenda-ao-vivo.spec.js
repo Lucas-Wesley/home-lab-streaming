@@ -11,14 +11,14 @@ ${Array.from({ length: 30 }, (_, i) => {
 }).join('\n\n')}
 `
 
-async function abrir(page, posicao, { flashcards = false, largura = 390 } = {}) {
+async function abrir(page, posicao, { flashcards = false, audio = false, largura = 390 } = {}) {
   await page.route('**/api/telas', (r) => r.fulfill({ json: [{ id: TELA, nome: 'TV de teste', ligada: true }] }))
   await page.route('**/api/telas/*/estado', (r) =>
     r.fulfill({ json: { estado: 'PAUSED_PLAYBACK', posicao, duracao: 600, volume: 10, idade_ms: 0, sessao: { chave: 'filme:1', titulo: 'Filme de teste' } } }),
   )
   await page.route('**/api/legendas/filme:1', (r) => r.fulfill({ json: { escolhida: { id: 'l1', idioma: 'en', atraso: 0, escala: 1 } } }))
   await page.route('**/api/legenda/l1.vtt*', (r) => r.fulfill({ body: VTT, contentType: 'text/vtt' }))
-  await page.route('**/api/flashcards', (r) => r.fulfill({ json: { disponivel: flashcards } }))
+  await page.route(/\/api\/flashcards\?/, (r) => r.fulfill({ json: { disponivel: flashcards, audio } }))
   await page.setViewportSize({ width: largura, height: 844 })
   await page.goto(`/#/controle/${encodeURIComponent(TELA)}`)
 }
@@ -49,12 +49,32 @@ test('entre duas falas, nenhuma em destaque e a próxima espera no meio', async 
   await expect.poll(() => noMeio(page)).toBe('Fala número 22')
 })
 
-test('com uma fala escolhida, as três ações ficam numa linha só, mesmo no celular estreito', async ({ page }) => {
-  await abrir(page, 40.5, { flashcards: true, largura: 360 })
+test('com uma fala escolhida, as ações ficam numa linha só, mesmo no celular estreito', async ({ page }) => {
+  await abrir(page, 40.5, { flashcards: true, audio: true, largura: 360 })
   await page.locator('.fala', { hasText: 'Fala número 21' }).click()
   const botoes = page.locator('.acoes-da-legenda .botao')
-  await expect(botoes).toHaveText(['Voltar ao ponto', 'Gerar flashcard', 'Cancelar'])
+  await expect(botoes).toHaveText(['Voltar ao ponto', 'Gerar flashcard', 'Com áudio', '✕'])
   const topos = await botoes.evaluateAll((bs) => bs.map((b) => Math.round(b.getBoundingClientRect().top)))
   expect(new Set(topos).size).toBe(1)
   await page.locator('.acoes-da-legenda').screenshot({ path: process.env.FOTO || 'test-results/acoes.png' })
+})
+
+test('"Com áudio" manda o trecho da fala junto', async ({ page }) => {
+  await abrir(page, 40.5, { flashcards: true, audio: true })
+  let pedido
+  await page.route('**/api/flashcards', (r) => {
+    pedido = r.request().postDataJSON()
+    r.fulfill({ status: 202, json: { estado: 'na fila' } })
+  })
+  await page.locator('.fala', { hasText: 'Fala número 21' }).click()
+  await page.locator('.fala', { hasText: 'Fala número 22' }).click()
+  await page.getByRole('button', { name: 'Com áudio' }).click()
+  await expect(page.getByText('com o áudio da fala')).toBeVisible()
+  expect(pedido).toMatchObject({ chave: 'filme:1', audio: true, inicio: 40, fim: 43, falas: ['Fala número 21', 'Fala número 22'] })
+})
+
+test('sem como cortar o áudio, só "Gerar flashcard"', async ({ page }) => {
+  await abrir(page, 40.5, { flashcards: true })
+  await page.locator('.fala', { hasText: 'Fala número 21' }).click()
+  await expect(page.locator('.acoes-da-legenda .botao')).toHaveText(['Voltar ao ponto', 'Gerar flashcard', '✕'])
 })

@@ -8,7 +8,10 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime/multipart"
 	"net/http"
+	"os"
+	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -20,6 +23,9 @@ import (
 // diálogo, ♪, [sons]) e traduz pelo sentido da cena; o Flashcards só recebe o cartão pronto, pela API
 // dele (POST /api/notas). Sem FLASHCARDS_URL ou sem o Claude, o botão não aparece. O pedido só entra
 // na fila: o servidor responde na hora e faz os cartões um por vez, sem avisar o celular depois.
+// "Com áudio" (S39) corta o trecho da fala do próprio vídeo (ffmpeg, na faixa do idioma da legenda) e
+// manda junto: o Flashcards toca na frente do cartão. Só de onde o áudio sai sem a conexão da
+// assinatura: torrent, vídeo baixado ou o áudio já puxado para gerar a legenda.
 
 func urlDoFlashcards() string { return strings.TrimRight(env("FLASHCARDS_URL", ""), "/") }
 
@@ -28,7 +34,8 @@ const nomeDoBaralhoDeIngles = "Inglês"
 func flashcardsDisponivel() bool { return urlDoFlashcards() != "" && claudeDisponivel() }
 
 func (a *app) handleFlashcardsDisponivel(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]bool{"disponivel": flashcardsDisponivel()})
+	fonte, _ := a.fonteDaFala(r.Context(), r.URL.Query().Get("chave"))
+	writeJSON(w, http.StatusOK, map[string]bool{"disponivel": flashcardsDisponivel(), "audio": flashcardsDisponivel() && fonte != ""})
 }
 
 const esquemaDoCartao = `{"type":"object","properties":{"ingles":{"type":"string"},"traducao":{"type":"string"},"nota":{"type":"string"}},"required":["ingles","traducao","nota"]}`
@@ -42,6 +49,9 @@ func (a *app) handleMandarParaOFlashcards(w http.ResponseWriter, r *http.Request
 		Falas  []string `json:"falas"`  // a fala tocada (ou as seguidas)
 		Antes  []string `json:"antes"`  // falas de antes e de depois, só para o Claude entender a cena
 		Depois []string `json:"depois"` //
+		Audio  bool     `json:"audio"`  // cortar o trecho da fala no vídeo
+		Inicio float64  `json:"inicio"` // segundos no vídeo, já com a sincronia da legenda
+		Fim    float64  `json:"fim"`    //
 	}
 	if !lerCorpo(w, r, &corpo) {
 		return
@@ -54,22 +64,42 @@ func (a *app) handleMandarParaOFlashcards(w http.ResponseWriter, r *http.Request
 	case frase == "" || len(frase) > 1000:
 		erroJSON(w, http.StatusBadRequest, "Escolha uma fala da legenda.")
 		return
+	case corpo.Audio && (corpo.Inicio < 0 || corpo.Fim <= corpo.Inicio || corpo.Fim-corpo.Inicio > duracaoMaximaDaFala):
+		erroJSON(w, http.StatusBadRequest, "Trecho da fala inválido.")
+		return
 	}
-	titulo, fonte := "", ""
+	fonte, faixa := "", 0
+	if corpo.Audio {
+		if fonte, faixa = a.fonteDaFala(r.Context(), corpo.Chave); fonte == "" {
+			erroJSON(w, http.StatusConflict, "O áudio só sai de vídeo do torrent ou baixado: ouvir a assinatura ocuparia a conexão.")
+			return
+		}
+	}
+	titulo, link := "", ""
 	if p := a.progressoDe(r.Context(), corpo.Chave); p != nil {
 		titulo = p.Titulo
 		var tmdb string
 		a.db.QueryRowContext(r.Context(), `SELECT tmdb FROM progresso WHERE chave = ?`, corpo.Chave).Scan(&tmdb)
 		if m := reTMDBGuardado.FindStringSubmatch(tmdb); m != nil {
-			fonte = "https://www.themoviedb.org/" + tiposDoTMDB[m[1]] + "/" + m[2]
+			link = "https://www.themoviedb.org/" + tiposDoTMDB[m[1]] + "/" + m[2]
 		}
 	}
 	go func() {
+		// O áudio sai antes da fila: o torrent pode parar enquanto outros cartões esperam o Claude.
+		audio := ""
+		if fonte != "" {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+			var err error
+			if audio, err = a.mandarAudioDaFala(ctx, fonte, faixa, corpo.Inicio, corpo.Fim); err != nil {
+				log.Printf("flashcards: áudio de %q: %v", frase, err) // o cartão sai sem áudio
+			}
+			cancel()
+		}
 		filaDeCartoes.Lock()
 		defer filaDeCartoes.Unlock()
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
-		if err := a.fazerCartao(ctx, frase, titulo, fonte, corpo.Antes, corpo.Depois); err != nil {
+		if err := a.fazerCartao(ctx, frase, titulo, link, audio, corpo.Antes, corpo.Depois); err != nil {
 			log.Printf("flashcards: %q: %v", frase, err)
 		}
 	}()
@@ -77,7 +107,7 @@ func (a *app) handleMandarParaOFlashcards(w http.ResponseWriter, r *http.Request
 }
 
 // fazerCartao pede ao Claude a frase limpa e a tradução e cria a nota no Flashcards.
-func (a *app) fazerCartao(ctx context.Context, frase, titulo, fonte string, antes, depois []string) error {
+func (a *app) fazerCartao(ctx context.Context, frase, titulo, fonte, audio string, antes, depois []string) error {
 	var pedido strings.Builder
 	fmt.Fprintf(&pedido, "O Lucas está aprendendo inglês vendo um vídeo%s com legenda em inglês. Ele tocou nesta fala para virar "+
 		"flashcard (a frase em inglês na frente, a tradução no verso).\n\nFala escolhida:\n%s\n\n", entreParenteses(titulo), frase)
@@ -110,8 +140,99 @@ func (a *app) fazerCartao(ctx context.Context, frase, titulo, fonte string, ante
 	if err != nil {
 		return err
 	}
-	nota := map[string]string{"baralho_id": baralho, "tipo": "basico", "frente": strings.TrimSpace(c.Ingles), "verso": verso, "tags": "streaming", "fonte": fonte}
+	nota := map[string]string{"baralho_id": baralho, "tipo": "basico", "frente": strings.TrimSpace(c.Ingles), "verso": verso, "tags": "streaming", "fonte": fonte, "audio": audio}
 	return a.pedirAoFlashcards(ctx, http.MethodPost, "/api/notas", nota, nil)
+}
+
+// ---------- O áudio da fala ----------
+
+const (
+	duracaoMaximaDaFala = 30.0
+	folgaAntesDaFala    = 0.25 // a legenda costuma entrar um pouco depois da voz
+	folgaDepoisDaFala   = 0.4
+)
+
+// fonteDaFala: de onde cortar o áudio sem usar a conexão da assinatura, e a faixa no idioma da
+// legenda escolhida (sem saber, a primeira). Vazio: daqui não dá.
+func (a *app) fonteDaFala(ctx context.Context, chave string) (string, int) {
+	m := reChaveDeVideo.FindStringSubmatch(chave)
+	if m == nil {
+		return "", 0
+	}
+	fonte := ""
+	if m[1] == "arquivo" {
+		var id int64
+		fmt.Sscan(m[2], &id)
+		f, _, err := a.arquivo(ctx, id)
+		if err != nil {
+			return "", 0
+		}
+		if fonte = a.caminhoBaixado(f); fonte == "" {
+			base, err := a.enderecoInterno()
+			if err != nil {
+				return "", 0
+			}
+			fonte = fmt.Sprintf("%s/arquivo/%d", base, f.ID)
+		}
+	} else if fonte = a.baixadoDaAssinatura(ctx, chave); fonte == "" {
+		// O áudio puxado para gerar a legenda (S29) só tem a faixa que foi ouvida.
+		if puxado := a.audioPuxado(chave); semErro(os.Stat(puxado)) {
+			return puxado, 0
+		}
+		return "", 0
+	}
+	faixa := 0
+	if l, s := a.legendaDe(ctx, chave), a.formatosGuardados(ctx, chave); l != nil && s != nil {
+		for i, au := range s.Audios {
+			if idiomaCurto(strings.ToLower(au.Idioma)) == idiomaDaLegenda(l.Idioma) {
+				faixa = i
+				break
+			}
+		}
+	}
+	return fonte, faixa
+}
+
+func semErro(_ os.FileInfo, err error) bool { return err == nil }
+
+// mandarAudioDaFala corta a fala (com uma folga em volta, entrando e saindo devagar) em MP3 e manda
+// ao Flashcards; devolve o nome que ele guardou.
+func (a *app) mandarAudioDaFala(ctx context.Context, fonte string, faixa int, inicio, fim float64) (string, error) {
+	inicio = max(0, inicio-folgaAntesDaFala)
+	duracao := fim + folgaDepoisDaFala - inicio
+	filtro := fmt.Sprintf("afade=t=in:d=0.08,afade=t=out:st=%.2f:d=0.15", max(0, duracao-0.15))
+	mp3, err := exec.CommandContext(ctx, programaFFmpeg, "-v", "error", "-ss", fmt.Sprintf("%.2f", inicio), "-t", fmt.Sprintf("%.2f", duracao),
+		"-i", fonte, "-map", fmt.Sprintf("0:a:%d", faixa), "-vn", "-af", filtro, "-ac", "1", "-ar", "44100", "-b:a", "96k", "-f", "mp3", "-").Output()
+	if err != nil {
+		return "", fmt.Errorf("ffmpeg: %w", err)
+	}
+	if len(mp3) < 1000 {
+		return "", errors.New("o trecho saiu sem áudio")
+	}
+	var corpo bytes.Buffer
+	mw := multipart.NewWriter(&corpo)
+	parte, _ := mw.CreateFormFile("arquivo", "fala.mp3")
+	parte.Write(mp3)
+	mw.Close()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, urlDoFlashcards()+"/api/audios", &corpo)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	resp, err := a.http.Do(req)
+	if err != nil {
+		return "", errors.New("O Flashcards não respondeu.")
+	}
+	defer resp.Body.Close()
+	var r struct {
+		Nome string `json:"nome"`
+		Erro string `json:"erro"`
+	}
+	json.NewDecoder(io.LimitReader(resp.Body, 1<<16)).Decode(&r)
+	if resp.StatusCode >= 400 || r.Nome == "" {
+		return "", fmt.Errorf("O Flashcards recusou o áudio (%d): %s", resp.StatusCode, primeiro(r.Erro, resp.Status))
+	}
+	return r.Nome, nil
 }
 
 // baralhoDeIngles acha o baralho "Inglês" pelo nome (sem acento nem maiúscula); se não houver, cria.

@@ -7,7 +7,8 @@ import { enderecoDaLegenda, falaAtual, lerVTT } from './legendas.js'
 // fica no meio, em destaque; entre uma fala e outra, nenhuma fica em destaque e a próxima já espera
 // no meio. As de antes continuam ali para dar tempo de tocar. Tocar numa fala a escolhe (tocar na
 // vizinha junta as duas, para a frase cortada ao meio) e "Gerar flashcard" vira cartão no
-// baralho Inglês, traduzido pelo Claude. Rolar com o dedo solta a legenda até "Voltar ao ponto".
+// baralho Inglês, traduzido pelo Claude; "Com áudio" leva junto o trecho da fala cortado do vídeo (S39,
+// só no torrent ou no vídeo baixado). Rolar com o dedo solta a legenda até "Voltar ao ponto".
 const props = defineProps({
   chave: { type: String, required: true },
   posicao: { type: Number, required: true }, // segundos, já contando o tempo desde a última leitura
@@ -19,8 +20,9 @@ const emit = defineEmits(['falas'])
 const legenda = ref(null)
 const falas = ref([])
 const escolhidas = ref([]) // índices seguidos
-const mandando = ref(false)
+const mandando = ref('') // 'texto' ou 'audio' enquanto manda
 const flashcards = ref(false)
+const comAudio = ref(false) // o servidor consegue cortar o áudio deste vídeo
 const seguindo = ref(true)
 const lista = ref(null)
 
@@ -89,10 +91,10 @@ function tocar(i) {
   else escolhidas.value = [i]
 }
 
-async function mandar() {
+async function mandar(audio = false) {
   const e = escolhidas.value
   if (!e.length) return
-  mandando.value = true
+  mandando.value = audio ? 'audio' : 'texto'
   try {
     const f = falas.value
     await api('/api/flashcards', {
@@ -102,14 +104,15 @@ async function mandar() {
         falas: e.map((i) => f[i].texto),
         antes: f.slice(Math.max(0, e[0] - 4), e[0]).map((x) => x.texto),
         depois: f.slice(e[e.length - 1] + 1, e[e.length - 1] + 3).map((x) => x.texto),
+        ...(audio && { audio: true, inicio: f[e[0]].inicio, fim: f[e[e.length - 1]].fim }),
       },
     })
     escolhidas.value = []
-    recado('Mandado para o Flashcards.')
+    recado(audio ? 'Mandado para o Flashcards, com o áudio da fala.' : 'Mandado para o Flashcards.')
   } catch (err) {
     recado(err.message, true)
   } finally {
-    mandando.value = false
+    mandando.value = ''
   }
 }
 
@@ -119,7 +122,9 @@ onMounted(async () => {
   carregar()
   relogio = setInterval(carregar, 20000)
   try {
-    flashcards.value = (await api('/api/flashcards')).disponivel
+    const d = await api(`/api/flashcards?chave=${encodeURIComponent(props.chave)}`)
+    flashcards.value = d.disponivel
+    comAudio.value = !!d.audio
   } catch {
     flashcards.value = false
   }
@@ -145,10 +150,13 @@ onBeforeUnmount(() => clearInterval(relogio))
     <div class="acoes-da-legenda">
       <button v-if="!seguindo" class="botao" @click="voltarAoPonto">Voltar ao ponto</button>
       <template v-if="escolhidas.length">
-        <button v-if="podeMandar" class="botao principal" :disabled="mandando" @click="mandar">
-          {{ mandando ? 'Mandando…' : escolhidas.length > 1 ? `Gerar flashcard (${escolhidas.length})` : 'Gerar flashcard' }}
+        <button v-if="podeMandar" class="botao principal" :disabled="!!mandando" @click="mandar()">
+          {{ mandando === 'texto' ? 'Mandando…' : escolhidas.length > 1 ? `Gerar flashcard (${escolhidas.length})` : 'Gerar flashcard' }}
         </button>
-        <button class="botao" :disabled="mandando" @click="escolhidas = []">Cancelar</button>
+        <button v-if="podeMandar && comAudio" class="botao principal" :disabled="!!mandando" @click="mandar(true)">
+          {{ mandando === 'audio' ? 'Mandando…' : 'Com áudio' }}
+        </button>
+        <button class="botao fechar" :disabled="!!mandando" aria-label="Cancelar" title="Cancelar" @click="escolhidas = []">✕</button>
       </template>
       <p v-else-if="podeMandar && seguindo" class="dica">Toque numa fala para gerar um flashcard.</p>
     </div>
@@ -217,6 +225,11 @@ onBeforeUnmount(() => clearInterval(relogio))
   min-height: 36px;
   padding: 0 10px;
   font-size: 0.82rem;
+}
+
+.acoes-da-legenda .fechar {
+  width: 36px;
+  padding: 0;
 }
 
 .dica {

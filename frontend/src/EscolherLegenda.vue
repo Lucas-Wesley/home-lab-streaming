@@ -4,11 +4,11 @@ import { api } from './api.js'
 import { sincroniaLegivel } from './legendas.js'
 
 // Lista as legendas do OpenSubtitles para um vídeo (S21), um idioma por aba, a mais provável no
-// topo, e oferece gerar uma pelo áudio (S29). A escolhida fica guardada no servidor e vale no
+// topo, e oferece gerar uma pelo áudio (S29), num botão discreto no fim. A escolhida fica guardada no servidor e vale no
 // player e nas telas. liberar: aberta pelo controle de uma tela, que pode parar uns segundos para
 // o servidor puxar o áudio da assinatura.
 const props = defineProps({ chave: { type: String, required: true }, liberar: { type: Boolean, default: false } })
-const emit = defineEmits(['escolheu', 'ajustou'])
+const emit = defineEmits(['escolheu', 'ajustou', 'sincronizar'])
 const recado = inject('recado')
 
 const dados = ref(null)
@@ -56,7 +56,12 @@ async function ajustar(delta) {
   }
 }
 
+// Sincronizar de novo (S38): só em vídeo de torrent, que o servidor ouve sem ocupar a assinatura.
+// Quem abriu a folha pausa o vídeo e manda a posição.
+const podeSincronizar = computed(() => props.chave.startsWith('arquivo:'))
+
 // Gerar pelo áudio (S29): o Parakeet ouve o vídeo minuto a minuto, à frente de quem assiste.
+const abrirGerar = ref(false)
 const gerada = computed(() => dados.value?.escolhida?.geracao || null)
 const gerando = computed(() => gerada.value && !['pronta', 'parada', 'erro'].includes(gerada.value.estado))
 const faixas = computed(() => dados.value?.gerar?.faixas || [])
@@ -156,6 +161,7 @@ onBeforeUnmount(() => clearInterval(relogio))
           <template v-if="dados.escolhida.alinhando">Conferindo a sincronia…</template>
           <template v-else><strong>Sincronia:</strong> {{ sincroniaLegivel(dados.escolhida) }}. <span class="suave">{{ dados.escolhida.ajuste }}</span></template>
         </p>
+        <button v-if="!gerada && podeSincronizar" class="botao principal sincronizar" :disabled="ajustando || dados.escolhida.alinhando" @click="emit('sincronizar')">Sincronizar a legenda</button>
         <div v-if="!gerada" class="ajuste">
           <button class="botao" :disabled="ajustando" title="A legenda aparece depois da fala" @click="ajustar(-0.5)">−0,5 s<small>legenda atrasada</small></button>
           <button class="botao" :disabled="ajustando" title="A legenda aparece antes da fala" @click="ajustar(0.5)">+0,5 s<small>legenda adiantada</small></button>
@@ -164,25 +170,6 @@ onBeforeUnmount(() => clearInterval(relogio))
       </template>
       <p v-else class="sem-legenda"><span class="selo grande">—</span><span><span class="rotulo-pequeno">Legenda em uso</span><strong class="idioma-em-uso">Sem legenda</strong></span></p>
     </div>
-
-    <!-- Gerar pelo áudio -->
-    <section v-if="dados?.gerar?.disponivel && !gerada" class="gerar">
-      <div class="cabeca-gerar">
-        <span class="selo grande ia">IA</span>
-        <span>
-          <strong>Gerar pelo áudio</strong>
-          <span class="suave">Transcreve as falas no idioma do áudio. Fica pronta em menos de 1 minuto e continua à frente enquanto você assiste<template v-if="dados.gerar.revisao">, com uma segunda revisão (Whisper + Claude)</template>.</span>
-        </span>
-      </div>
-      <div class="linha-acoes">
-        <template v-if="faixas.length > 1">
-          <button v-for="f in faixas" :key="f.indice" class="botao" :disabled="!!escolhendo" @click="gerar(f.indice)">
-            {{ escolhendo === 'gerar' ? 'Pedindo…' : `Áudio em ${nomeDoIdioma(f.idioma).toLowerCase()}` }}
-          </button>
-        </template>
-        <button v-else class="botao principal" :disabled="!!escolhendo" @click="gerar()">{{ escolhendo === 'gerar' ? 'Pedindo…' : 'Gerar legenda' }}</button>
-      </div>
-    </section>
 
     <template v-if="dados?.configurado">
       <p v-if="!grupos.length" class="vazio">Nenhuma legenda em português ou inglês para este vídeo.</p>
@@ -224,6 +211,17 @@ onBeforeUnmount(() => clearInterval(relogio))
       </button>
       <p class="suave nota">As primeiras de cada idioma são as da mesma versão do vídeo. Se ficar fora de tempo, ajuste acima ou escolha outra.</p>
     </template>
+
+    <!-- Gerar pelo áudio: raro, fica no fim -->
+    <div v-if="dados?.gerar?.disponivel && !gerada" class="gerar">
+      <button v-if="faixas.length < 2" class="botao" :disabled="!!escolhendo" @click="gerar()">{{ escolhendo === 'gerar' ? 'Pedindo…' : 'Gerar legenda com IA' }}</button>
+      <button v-else-if="!abrirGerar" class="botao" @click="abrirGerar = true">Gerar legenda com IA</button>
+      <template v-else>
+        <button v-for="f in faixas" :key="f.indice" class="botao" :disabled="!!escolhendo" @click="gerar(f.indice)">
+          {{ escolhendo === 'gerar' ? 'Pedindo…' : `Pelo áudio em ${nomeDoIdioma(f.idioma).toLowerCase()}` }}
+        </button>
+      </template>
+    </div>
   </div>
 </template>
 
@@ -294,34 +292,20 @@ onBeforeUnmount(() => clearInterval(relogio))
 }
 
 .gerar {
-  display: grid;
-  gap: 12px;
-  margin-bottom: 18px;
-  padding: 14px 16px;
-  border: 1px dashed var(--linha-forte);
-  border-radius: var(--raio);
-}
-
-.cabeca-gerar {
   display: flex;
-  gap: 12px;
-  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--linha);
 }
 
-.cabeca-gerar > span:last-child {
-  display: grid;
-  gap: 2px;
-  font-size: 0.88rem;
-  line-height: 1.45;
+.gerar .botao {
+  color: var(--texto-suave);
 }
 
-.cabeca-gerar strong {
-  font-size: 1rem;
-}
-
-.selo.ia {
-  background: var(--marca);
-  color: var(--marca-texto);
+.sincronizar {
+  margin-bottom: 10px;
 }
 
 .estado-da-sincronia {

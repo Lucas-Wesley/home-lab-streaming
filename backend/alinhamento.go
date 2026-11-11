@@ -211,47 +211,110 @@ func (a *app) acharSincronia(ctx context.Context, tipo string, id int64, legenda
 	}
 	// 3. O Whisper ouve 3 trechos do vídeo e as falas são casadas com as da legenda (S26).
 	if urlDoWhisper() != "" {
-		endereco := caminho
-		if endereco == "" {
-			base, err := a.enderecoInterno()
-			if err != nil {
-				return semReferencia, nada
-			}
-			endereco = fmt.Sprintf("%s/arquivo/%d", base, f.ID)
-		}
-		duracao := a.duracaoDoArquivo(ctx, f)
-		ouvido, err := a.ouvir(ctx, endereco, duracao, []float64{0.25, 0.5, 0.75}, 90)
-		if err != nil {
-			return semReferencia, nada
-		}
-		if ouvido.Idioma != idiomaDaLegenda(idioma) {
-			// Idiomas diferentes: casar pelo sentido é com o Claude (S27).
-			return a.sincroniaEntreIdiomas(ctx, ouvido, texto, idioma)
-		}
-		pares, _ := casarFalas(ouvido.Falas, falasComTexto(texto))
-		if al, ok := sincroniaPelasFalas(pares); ok {
-			txt := fmt.Sprintf("Ajustada sozinha em %s pelo áudio do vídeo (Whisper).", segundosComSinal(al.Atraso))
-			if al.Atraso == 0 {
-				txt = "Conferida pelo áudio do vídeo (Whisper): já estava sincronizada."
-			}
-			return txt, al
-		}
-		return "O áudio não bateu com esta legenda: talvez seja de outra versão. Escolha outra ou use o ajuste manual.", nada
+		txt, al, _ := a.sincroniaPeloAudio(ctx, f, caminho, texto, idioma, a.duracaoDoArquivo(ctx, f), []float64{0.25, 0.5, 0.75}, 90, "pelo áudio do vídeo")
+		return txt, al
 	}
 	return semReferencia, nada
 }
 
 // sincroniaEntreIdiomas: o áudio e a legenda estão em idiomas diferentes, então as palavras não
 // batem; o Claude casa as falas pelo sentido (S27) e o atraso sai dos pares que ele achou.
-func (a *app) sincroniaEntreIdiomas(ctx context.Context, ouvido transcricao, legenda []byte, idioma string) (string, alinhamento) {
+func (a *app) sincroniaEntreIdiomas(ctx context.Context, ouvido transcricao, legenda []byte, idioma string) (string, alinhamento, bool) {
 	aviso := fmt.Sprintf("O áudio está em %s e a legenda em %s", idiomaPorExtenso(ouvido.Idioma), idiomaPorExtenso(idioma))
 	pares, confianca, err := a.casarPeloSentido(ctx, ouvido, falasComTexto(legenda), idioma)
 	if err == nil && confianca != "baixa" {
 		if al, ok := sincroniaPelasFalas(pares); ok {
-			return fmt.Sprintf("Ajustada sozinha em %s: o Claude casou as falas do áudio em %s com as da legenda.", segundosComSinal(al.Atraso), idiomaPorExtenso(ouvido.Idioma)), al
+			return fmt.Sprintf("Ajustada sozinha em %s: o Claude casou as falas do áudio em %s com as da legenda.", segundosComSinal(al.Atraso), idiomaPorExtenso(ouvido.Idioma)), al, true
 		}
 	}
-	return aviso + ": se ficar adiantada ou atrasada, use o ajuste manual.", alinhamento{Escala: 1}
+	return aviso + ": se ficar adiantada ou atrasada, use o ajuste manual.", alinhamento{Escala: 1}, false
+}
+
+// sincroniaPeloAudio: o Whisper ouve trechos do vídeo (pontos × duração, cada um com tamanho
+// segundos) e as falas são casadas com as da legenda; em outro idioma, pelo sentido, com o Claude.
+func (a *app) sincroniaPeloAudio(ctx context.Context, f arquivoDeTorrent, caminho string, texto []byte, idioma string, duracao float64, pontos []float64, tamanho float64, de string) (string, alinhamento, bool) {
+	nada := alinhamento{Escala: 1}
+	endereco := caminho
+	if endereco == "" {
+		base, err := a.enderecoInterno()
+		if err != nil {
+			return semReferencia, nada, false
+		}
+		endereco = fmt.Sprintf("%s/arquivo/%d", base, f.ID)
+	}
+	ouvido, err := a.ouvir(ctx, endereco, duracao, pontos, tamanho)
+	if err != nil {
+		return semReferencia, nada, false
+	}
+	if ouvido.Idioma != idiomaDaLegenda(idioma) {
+		// Idiomas diferentes: casar pelo sentido é com o Claude (S27).
+		return a.sincroniaEntreIdiomas(ctx, ouvido, texto, idioma)
+	}
+	pares, _ := casarFalas(ouvido.Falas, falasComTexto(texto))
+	if al, ok := sincroniaPelasFalas(pares); ok {
+		txt := fmt.Sprintf("Ajustada sozinha em %s %s (Whisper).", segundosComSinal(al.Atraso), de)
+		if al.Atraso == 0 {
+			txt = "Conferida " + de + " (Whisper): já estava sincronizada."
+		}
+		return txt, al, true
+	}
+	return "O áudio não bateu com esta legenda: talvez seja de outra versão. Escolha outra ou use o ajuste manual.", nada, false
+}
+
+// ---------- Sincronizar de novo, pelo ponto em que o vídeo está ----------
+
+// sincronizarNoPonto: o botão "Sincronizar a legenda" (S38). O Whisper ouve 2 min em volta de onde o
+// Lucas está, que é onde a diferença importa; se não der, refaz o ajuste automático inteiro.
+func (a *app) sincronizarNoPonto(chave, tipo string, id int64, legendaID string, posicao float64) {
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
+	defer cancel()
+	var idioma string
+	a.db.QueryRow(`SELECT idioma FROM legendas_escolhidas WHERE chave = ?`, chave).Scan(&idioma)
+	ajuste, al, ok := "", alinhamento{Escala: 1}, false
+	texto, err := os.ReadFile(a.arquivoDaLegenda(legendaID))
+	if err == nil && urlDoWhisper() != "" {
+		if f, _, err := a.arquivo(ctx, id); err == nil {
+			// Duração 1: o ponto já vem em segundos.
+			ajuste, al, ok = a.sincroniaPeloAudio(ctx, f, a.caminhoBaixado(f), texto, idioma, 1, []float64{posicao}, 120, "pelo áudio deste ponto")
+		}
+	}
+	if !ok {
+		ajuste, al = a.acharSincronia(ctx, tipo, id, legendaID, idioma)
+	}
+	a.db.Exec(`UPDATE legendas_escolhidas SET atraso = ?, escala = ?, ajuste = ?, alinhando = 0 WHERE chave = ? AND id = ? AND alinhando = 1`,
+		al.Atraso, al.Escala, ajuste, chave, legendaID)
+}
+
+func (a *app) handleSincronizarLegenda(w http.ResponseWriter, r *http.Request) {
+	chave, tipo, id, ok := chaveDaLegenda(w, r)
+	if !ok {
+		return
+	}
+	var corpo struct {
+		Posicao float64 `json:"posicao"` // segundos
+	}
+	if !lerCorpo(w, r, &corpo) {
+		return
+	}
+	l := a.legendaDe(r.Context(), chave)
+	switch {
+	case l == nil:
+		erroJSON(w, http.StatusConflict, "Escolha uma legenda primeiro.")
+		return
+	case l.Geracao != nil:
+		erroJSON(w, http.StatusConflict, "A legenda gerada pelo áudio já sai sincronizada.")
+		return
+	case tipo != "arquivo":
+		erroJSON(w, http.StatusConflict, "Vídeo da assinatura: ouvir o áudio ocuparia a conexão. Use o ajuste de ±0,5 s.")
+		return
+	}
+	if _, err := a.db.ExecContext(r.Context(), `UPDATE legendas_escolhidas SET alinhando = 1 WHERE chave = ?`, chave); err != nil {
+		falha(w, err)
+		return
+	}
+	posicao := math.Max(0, corpo.Posicao)
+	a.emFundo(func() { a.sincronizarNoPonto(chave, tipo, id, l.ID, posicao) })
+	writeJSON(w, http.StatusOK, a.legendaDe(r.Context(), chave))
 }
 
 // duracaoDoArquivo: a da sondagem guardada ou, se ainda não houver, lida agora.

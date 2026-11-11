@@ -6,7 +6,7 @@ import { enderecoDaLegenda, falaAtual, lerVTT } from './legendas.js'
 // A legenda passando no celular enquanto o vídeo toca na tela (S31). A fala que está na tela agora
 // fica no meio, em destaque; entre uma fala e outra, nenhuma fica em destaque e a próxima já espera
 // no meio. As de antes continuam ali para dar tempo de tocar. Tocar numa fala a escolhe (tocar na
-// vizinha junta as duas, para a frase cortada ao meio) e "Mandar para o Flashcards" vira cartão no
+// vizinha junta as duas, para a frase cortada ao meio) e "Gerar flashcard" vira cartão no
 // baralho Inglês, traduzido pelo Claude. Rolar com o dedo solta a legenda até "Voltar ao ponto".
 const props = defineProps({
   chave: { type: String, required: true },
@@ -146,11 +146,11 @@ onBeforeUnmount(() => clearInterval(relogio))
       <button v-if="!seguindo" class="botao" @click="voltarAoPonto">Voltar ao ponto</button>
       <template v-if="escolhidas.length">
         <button v-if="podeMandar" class="botao principal" :disabled="mandando" @click="mandar">
-          {{ mandando ? 'Mandando…' : escolhidas.length > 1 ? `Mandar as ${escolhidas.length} falas para o Flashcards` : 'Mandar para o Flashcards' }}
+          {{ mandando ? 'Mandando…' : escolhidas.length > 1 ? `Gerar flashcard (${escolhidas.length})` : 'Gerar flashcard' }}
         </button>
         <button class="botao" :disabled="mandando" @click="escolhidas = []">Cancelar</button>
       </template>
-      <p v-else-if="podeMandar && seguindo" class="dica">Toque numa fala para mandar ao Flashcards.</p>
+      <p v-else-if="podeMandar && seguindo" class="dica">Toque numa fala para gerar um flashcard.</p>
     </div>
   </section>
 </template>
@@ -201,19 +201,28 @@ onBeforeUnmount(() => clearInterval(relogio))
   color: var(--marca);
 }
 
+/* Numa linha só: as ações dividem a largura. */
 .acoes-da-legenda {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
   justify-content: center;
-  min-height: 40px;
+  min-height: 36px;
   margin-top: 8px;
+}
+
+.acoes-da-legenda .botao {
+  flex: 0 1 auto;
+  justify-content: center;
+  min-width: 0;
+  min-height: 36px;
+  padding: 0 10px;
+  font-size: 0.82rem;
 }
 
 .dica {
   margin: 0;
   color: var(--texto-fraco);
   font-size: 0.8rem;
-  line-height: 40px;
+  line-height: 36px;
 }
 </style>

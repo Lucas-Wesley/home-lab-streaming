@@ -179,6 +179,24 @@ async function legendaEscolhida(l) {
   }
 }
 
+// Sincronizar de novo (S38): o vídeo pausa enquanto o servidor ouve o trecho em volta deste ponto.
+async function sincronizarLegenda() {
+  escolhendoLegenda.value = false
+  const v = video.value
+  try {
+    let l = await api(`/api/legendas/${props.chave}/sincronizar`, { metodo: 'POST', corpo: { posicao: v?.currentTime || 0 } })
+    const tocava = v && !v.paused
+    v?.pause()
+    recado('Sincronizando a legenda pelo áudio deste ponto…')
+    l = await esperarAjuste(props.chave, l)
+    legenda.value = l
+    recado(l?.ajuste || 'Legenda sincronizada.')
+    if (tocava) v.play().catch(() => {})
+  } catch (e) {
+    recado(e.message, true)
+  }
+}
+
 async function mandarParaTela(tela) {
   enviando.value = tela.id
   const posicao = aoVivo ? 0 : video.value?.currentTime || 0
@@ -282,7 +300,7 @@ onBeforeUnmount(() => {
     </div>
 
     <Folha v-if="escolhendoLegenda" titulo="Legendas" @fechar="escolhendoLegenda = false">
-      <EscolherLegenda :chave="chave" @escolheu="legendaEscolhida" @ajustou="(l) => (legenda = l)" />
+      <EscolherLegenda :chave="chave" @escolheu="legendaEscolhida" @ajustou="(l) => (legenda = l)" @sincronizar="sincronizarLegenda" />
     </Folha>
 
     <Folha v-if="escolhendoTela" titulo="Assistir numa tela" @fechar="escolhendoTela = false">

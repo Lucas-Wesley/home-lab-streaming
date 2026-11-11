@@ -61,6 +61,7 @@ func newServer(a *app, web fs.FS, version string) http.Handler {
 	mux.HandleFunc("PATCH /api/legendas/{chave}", a.handleEscolherLegenda)
 	mux.HandleFunc("GET /api/legenda/{arquivo}", a.servirLegenda(true))
 	mux.HandleFunc("POST /api/legendas/{chave}/gerar", a.handleGerarLegenda)
+	mux.HandleFunc("POST /api/legendas/{chave}/sincronizar", a.handleSincronizarLegenda)
 	mux.HandleFunc("GET /api/flashcards", a.handleFlashcardsDisponivel)
 	mux.HandleFunc("POST /api/flashcards", a.handleMandarParaOFlashcards)
 	mux.HandleFunc("DELETE /api/legendas/{chave}/gerar", a.handleGerarLegenda)

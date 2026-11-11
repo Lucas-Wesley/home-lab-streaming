@@ -152,6 +152,28 @@ function legendaAjustada() {
   esperaDoAjuste = setTimeout(() => reenviar('Sincronia ajustada: o vídeo recomeça do mesmo ponto.'), 1500)
 }
 
+// Sincronizar de novo (S38): a tela pausa, o servidor ouve o trecho em volta deste ponto e acerta a
+// legenda; o vídeo volta do mesmo ponto com ela (e com a legenda em uso agora, se tinha ficado outra).
+async function sincronizarLegenda() {
+  const s = sessao.value
+  if (!s) return
+  escolhendoLegenda.value = false
+  ocupado.value = true
+  try {
+    let l = await api(`/api/legendas/${s.chave}/sincronizar`, { metodo: 'POST', corpo: { posicao: posicaoAoVivo.value } })
+    if (tocando.value) await comandar(props.id, 'pausar')
+    await lerEstado()
+    recado('Sincronizando a legenda pelo áudio deste ponto…')
+    l = await esperarAjuste(s.chave, l)
+    ocupado.value = false
+    await reenviar(`${l?.ajuste || 'Legenda sincronizada.'} O vídeo continua do mesmo ponto.`)
+  } catch (e) {
+    recado(e.message, true)
+  } finally {
+    ocupado.value = false
+  }
+}
+
 // Trazer de volta para o celular: o player assume a assinatura e a tela para sozinha.
 function assistirAqui() {
   const s = sessao.value
@@ -238,7 +260,7 @@ onBeforeUnmount(() => {
     </div>
 
     <Folha v-if="escolhendoLegenda && sessao" titulo="Legendas" @fechar="escolhendoLegenda = false">
-      <EscolherLegenda :chave="sessao.chave" liberar @escolheu="legendaEscolhida" @ajustou="legendaAjustada" />
+      <EscolherLegenda :chave="sessao.chave" liberar @escolheu="legendaEscolhida" @ajustou="legendaAjustada" @sincronizar="sincronizarLegenda" />
     </Folha>
   </div>
 </template>

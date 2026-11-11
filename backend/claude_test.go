@@ -29,7 +29,7 @@ func TestSincroniaEntreIdiomasPeloClaude(t *testing.T) {
 	args := claudeFalso(t, `{"pares":[[2703.9,2665.3],[2706.3,2667.7],[2708.4,2669.9],[2711.0,2672.5],[2717.6,2678.9],[2900.1,2862.0]],"confianca":"alta"}`)
 	ouvido := transcricao{Idioma: "en", Falas: []trechoFalado{{Inicio: 2703.9, Texto: "Now wait a minute, Mr. Cooper."}}}
 	legenda := []byte("1\n00:44:25,300 --> 00:44:27,000\nAgora espere um minuto, Sr. Cooper.\n\n")
-	txt, al := e.a.sincroniaEntreIdiomas(context.Background(), ouvido, legenda, "pt-BR")
+	txt, al, _ := e.a.sincroniaEntreIdiomas(context.Background(), ouvido, legenda, "pt-BR")
 	if math.Abs(al.Atraso-38.6) > 0.2 || !strings.Contains(txt, "Claude") {
 		t.Fatalf("sincronia pelo Claude: %q %+v", txt, al)
 	}
@@ -45,7 +45,7 @@ func TestSincroniaEntreIdiomasPeloClaude(t *testing.T) {
 
 	// Confiança baixa: não ajusta.
 	claudeFalso(t, `{"pares":[[1,2],[3,4],[5,6],[7,8]],"confianca":"baixa"}`)
-	if _, al := e.a.sincroniaEntreIdiomas(context.Background(), ouvido, legenda, "pt-BR"); al.Atraso != 0 {
+	if _, al, _ := e.a.sincroniaEntreIdiomas(context.Background(), ouvido, legenda, "pt-BR"); al.Atraso != 0 {
 		t.Fatalf("com confiança baixa não devia ajustar: %+v", al)
 	}
 }

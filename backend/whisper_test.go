@@ -125,3 +125,58 @@ func TestAjustePeloWhisper(t *testing.T) {
 		t.Fatalf("ajuste pelo Whisper: %+v (%d trechos ouvidos)", l, *chamadas)
 	}
 }
+
+// "Sincronizar a legenda" (S38): ouve em volta do ponto em que o vídeo está e refaz o atraso,
+// mesmo depois de um ajuste manual.
+func TestSincronizarNoPonto(t *testing.T) {
+	e := novoAmbiente(t)
+	mi := torrentDeVideoCom(t, "")
+	hash := enviarFicha(t, e, mi)
+	var d detalheDoTorrent
+	e.json(t, "/api/torrents/"+hash, &d)
+	id := d.Arquivos[0].ID
+	e.pedir(t, "POST", fmt.Sprintf("/api/arquivos/%d/baixar", id), nil)
+	for range 600 {
+		if e.json(t, "/api/torrents/"+hash, &d); d.Arquivos[0].Download == "baixado" {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	legenda := legendaFalada(3)
+	os := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/download":
+			fmt.Fprintf(w, `{"link":"http://%s/legenda.srt"}`, r.Host)
+		case "/legenda.srt":
+			fmt.Fprint(w, legenda)
+		default:
+			fmt.Fprint(w, `{"data":[]}`)
+		}
+	}))
+	defer os.Close()
+	t.Setenv("OPENSUBTITLES_URL", os.URL)
+	e.a.guardarAjuste("opensubtitles", "chave")
+
+	chave := fmt.Sprintf("arquivo:%d", id)
+	if s, _ := e.pedir(t, "POST", "/api/legendas/"+chave+"/sincronizar", map[string]float64{"posicao": 30}); s != http.StatusConflict {
+		t.Fatalf("sem legenda: %d", s)
+	}
+	e.pedir(t, "PUT", "/api/legendas/"+chave, legendaEscolhida{ID: "os-11", Idioma: "pt-BR", Nome: "Legenda"})
+	e.pedir(t, "PATCH", "/api/legendas/"+chave, map[string]float64{"atraso": -2})
+
+	whisper, chamadas := whisperFalso(t, legenda, "portuguese")
+	t.Setenv("WHISPER_URL", whisper.URL)
+	if s, _ := e.pedir(t, "POST", "/api/legendas/"+chave+"/sincronizar", map[string]float64{"posicao": 30}); s != http.StatusOK {
+		t.Fatalf("sincronizar: %d", s)
+	}
+	var r struct {
+		Escolhida legendaEscolhida `json:"escolhida"`
+	}
+	e.json(t, "/api/legendas/"+chave, &r)
+	if l := r.Escolhida; math.Abs(l.Atraso-5) > 0.1 || !strings.Contains(l.Ajuste, "deste ponto") || l.Alinhando || *chamadas != 1 {
+		t.Fatalf("sincronia pelo ponto: %+v (%d trechos ouvidos)", l, *chamadas)
+	}
+	if s, _ := e.pedir(t, "POST", "/api/legendas/filme:1/sincronizar", map[string]float64{"posicao": 30}); s != http.StatusConflict {
+		t.Fatalf("assinatura: %d", s)
+	}
+}

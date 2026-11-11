@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // Sugestões de melhoria que o Lucas anota no próprio app (Ajustes). O Claude Code lê pela API,
@@ -71,7 +72,7 @@ func (a *app) handleGuardarSugestao(w http.ResponseWriter, r *http.Request) {
 	_, err := a.db.ExecContext(r.Context(), `INSERT INTO sugestoes (id, texto, tela, estado, criada_em, atualizada_em)
 		VALUES (?, ?, ?, 'nova', ?, ?)
 		ON CONFLICT (id) DO UPDATE SET texto = excluded.texto, atualizada_em = excluded.atualizada_em
-		WHERE estado = 'nova'`, id, texto, strings.TrimSpace(corpo.Tela), a.agora(), a.agora())
+		WHERE estado = 'nova'`, id, texto, strings.TrimSpace(corpo.Tela), a.agoraEmTexto(), a.agoraEmTexto())
 	if err != nil {
 		falha(w, err)
 		return
@@ -93,7 +94,7 @@ func (a *app) handleMarcarSugestao(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	res, err := a.db.ExecContext(r.Context(), `UPDATE sugestoes SET estado = ?, resposta = ?, atualizada_em = ? WHERE id = ?`,
-		corpo.Estado, strings.TrimSpace(corpo.Resposta), a.agora(), r.PathValue("id"))
+		corpo.Estado, strings.TrimSpace(corpo.Resposta), a.agoraEmTexto(), r.PathValue("id"))
 	if err != nil {
 		falha(w, err)
 		return
@@ -111,6 +112,12 @@ func (a *app) handleApagarSugestao(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// agoraEmTexto: a data como o navegador lê (o time.Time direto no SQLite vira um texto que o
+// Date do JavaScript não entende).
+func (a *app) agoraEmTexto() string {
+	return a.agora().UTC().Format(time.RFC3339)
 }
 
 func (a *app) responderSugestao(w http.ResponseWriter, r *http.Request, id string) {

@@ -3,7 +3,7 @@
 App do **ecossistema de apps pessoais do Lucas**: central de streaming (canais, filmes e séries de uma assinatura
 IPTV) com o celular como controle remoto da TV e do projetor.
 
-**Comece lendo:** [`docs/DECISOES.md`](docs/DECISOES.md) — estado atual, decisões (S1–S36) e próximos passos.
+**Comece lendo:** [`docs/DECISOES.md`](docs/DECISOES.md) — estado atual, decisões (S1–S37) e próximos passos.
 
 ## Em uma frase
 O servidor guarda o acesso e o catálogo, repassa o vídeo do provedor (para o PWA em `/api/video`, para as telas em
@@ -46,4 +46,6 @@ Mesma infraestrutura e mesmo design system (`docs/DESIGN-SYSTEM.md`) das outras 
   (`agendas.go`). Nos testes, `AGENDA_URL`, `ESPN_URL` e `FOTMOB_URL` apontam para `agendaFalsa`, `espnFalsa` e
   `fotmobFalsa` (ou para um endereço fechado, em `novoAmbiente` e no Playwright). Nada dessas fontes de verdade nos
   testes. Erro de formato de uma fonte volta como `fonteMudou` (a página avisa que o leitor precisa mudar).
+- **Títulos para verificar** (S37): o Lucas manda títulos estranhos pelo menu ⋯ da página do título. Quando ele
+  pedir para "verificar os títulos reportados", seguir [`docs/PARA-VERIFICAR.md`](docs/PARA-VERIFICAR.md).
 - **Commits:** autoria do Lucas; **sem linha `Co-Authored-By`**.

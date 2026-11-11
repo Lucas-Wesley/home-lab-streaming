@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Andamento from './Andamento.vue'
 import BotaoFavorito from './BotaoFavorito.vue'
 import Folha from './Folha.vue'
@@ -37,6 +37,12 @@ const episodiosDaAssinatura = ref({}) // "temporada:número" → episódio do pr
 const downloads = ref({}) // chave → download da assinatura
 const outrosServicos = ref([]) // Netflix, HBO Max… que têm o título (S30)
 const carregandoAssinatura = ref(false)
+const ultimoEpisodio = ref(null) // { temporada, episodio }: vai junto se o título for mandado para verificação
+const menuAberto = ref(false)
+const relatando = ref(false) // a folha "Mandar para verificação" aberta
+const textoDoRelato = ref('')
+const enviandoRelato = ref(false)
+const recado = inject('recado')
 const saindo = new AbortController() // a página fechou: as buscas param
 onBeforeUnmount(() => saindo.abort())
 
@@ -228,6 +234,7 @@ async function buscarTorrents() {
 async function abrirEpisodio(e) {
   numeroAberto.value = e.numero
   const n = temporada.value
+  ultimoEpisodio.value = { temporada: n, episodio: e.numero }
   const k = `${n}:${e.numero}`
   if (!daEpisodio.value[k] && !buscaDoEpisodio.value[k]) {
     buscaDoEpisodio.value = { ...buscaDoEpisodio.value, [k]: { feitas: 0, total: 0, falharam: [] } }
@@ -291,6 +298,63 @@ const meta = computed(() => {
   return partes
 })
 
+// Mandar para verificação (S37): guarda o título e o que a página via, para o Claude investigar
+// depois (docs/PARA-VERIFICAR.md). As melhores opções vão resumidas, com a verificação de cada uma.
+const resumoDasOpcoes = (ops) =>
+  ops.slice(0, 5).map((o) => ({
+    titulo: o.titulo,
+    indexador: o.indexador,
+    tamanho: o.tamanho,
+    semeadores: o.semeadores,
+    nota: o.nota,
+    recomendado: o.recomendado,
+    verificacao: verificacoes[o.chave]?.estado || '',
+  }))
+
+function contextoDoRelato() {
+  const u = ultimoEpisodio.value
+  const k = u && `${u.temporada}:${u.episodio}`
+  let busca = null
+  if (!ehSerie) busca = { ...andamento.value, versoes: versoes.value.length, outros: outros.value.length, buscas: buscasFeitas.value, melhores: resumoDasOpcoes(versoes.value) }
+  else if (u) {
+    const ops = episodiosComTorrent(u.temporada)[u.episodio] || []
+    busca = { ...buscaDoEpisodio.value[k], torrents: undefined, opcoes: ops.length, buscas: daEpisodio.value[k]?.buscas || [], melhores: resumoDasOpcoes(ops) }
+  }
+  return {
+    endereco: location.hash,
+    assinatura: assinatura.value,
+    temporadas: (titulo.value?.temporadas || []).map((s) => ({ numero: s.numero, episodios: s.episodios })),
+    episodios_do_tmdb: u ? (episodios.value[u.temporada] || []).length : undefined,
+    episodios_na_assinatura: Object.keys(episodiosDaAssinatura.value).length,
+    tambem_em: outrosServicos.value.map((o) => o.servico),
+    busca,
+    erro: erroDosTorrents.value || buscaDoEpisodio.value[k]?.erro || '',
+  }
+}
+
+function abrirRelato() {
+  menuAberto.value = false
+  relatando.value = true
+}
+
+async function mandarParaVerificacao() {
+  enviandoRelato.value = true
+  try {
+    const u = ultimoEpisodio.value
+    await api(`/api/relatos/${crypto.randomUUID()}`, {
+      metodo: 'PUT',
+      corpo: { tipo, tmdb: Number(id), titulo: titulo.value.titulo, ano: titulo.value.ano || '', temporada: u?.temporada || 0, episodio: u?.episodio || 0, texto: textoDoRelato.value, contexto: contextoDoRelato() },
+    })
+    relatando.value = false
+    textoDoRelato.value = ''
+    recado('Guardado para verificação.')
+  } catch (e) {
+    recado(e.message, true)
+  } finally {
+    enviandoRelato.value = false
+  }
+}
+
 onMounted(async () => {
   try {
     const r = await api(`/api/titulos/${tipo}/${id}`, { tempo: 30000 })
@@ -314,7 +378,18 @@ onMounted(async () => {
 
 <template>
   <div class="pagina">
-    <a class="voltar" href="#/inicio" @click.prevent="voltar('#/inicio')"><Icone nome="voltar" />Voltar</a>
+    <div class="topo">
+      <a class="voltar" href="#/inicio" @click.prevent="voltar('#/inicio')"><Icone nome="voltar" />Voltar</a>
+      <div v-if="titulo" class="mais-opcoes">
+        <button class="botao icone" aria-label="Mais opções" title="Mais opções" :aria-expanded="menuAberto" @click="menuAberto = !menuAberto"><Icone nome="mais-opcoes" /></button>
+        <template v-if="menuAberto">
+          <div class="fora" @click="menuAberto = false"></div>
+          <div class="menu-opcoes vidro" role="menu">
+            <button role="menuitem" @click="abrirRelato">Mandar para verificação</button>
+          </div>
+        </template>
+      </div>
+    </div>
     <div v-if="erro" class="aviso erro">{{ erro }}</div>
 
     <template v-if="titulo">
@@ -412,6 +487,19 @@ onMounted(async () => {
       <p class="suave nota">Dados de filmes e séries: TMDB.<template v-if="outrosServicos.length"> Onde assistir: JustWatch.</template></p>
     </template>
 
+    <Folha v-if="relatando" titulo="Mandar para verificação" @fechar="relatando = false">
+      <form class="relato" @submit.prevent="mandarParaVerificacao">
+        <p class="suave">
+          Guarda {{ titulo.titulo }}<template v-if="ultimoEpisodio"> (T{{ ultimoEpisodio.temporada }} E{{ ultimoEpisodio.episodio }}, o último episódio aberto)</template> e o que esta página mostra agora, para o
+          Claude investigar depois. Nada muda por enquanto.
+        </p>
+        <textarea v-model="textoDoRelato" class="campo" rows="3" placeholder="O que pareceu errado? (opcional)" aria-label="O que pareceu errado"></textarea>
+        <div class="linha-acoes">
+          <button class="botao principal" :disabled="enviandoRelato">{{ enviandoRelato ? 'Guardando…' : 'Guardar para verificação' }}</button>
+        </div>
+      </form>
+    </Folha>
+
     <Folha v-if="episodioAberto" larga :titulo="`E${episodioAberto.numero} · ${episodioAberto.nome || `Episódio ${episodioAberto.numero}`}`" @fechar="numeroAberto = 0">
       <p v-if="episodioAberto.sinopse" class="suave sinopse-do-episodio">{{ episodioAberto.sinopse }}</p>
       <ul class="lista">
@@ -446,11 +534,18 @@ onMounted(async () => {
   max-width: 920px;
 }
 
+.topo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: -8px 0 16px;
+}
+
 .voltar {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  margin: -8px 0 16px -6px;
+  margin-left: -6px;
   color: var(--texto-suave);
   font-size: 0.9rem;
   text-decoration: none;
@@ -459,6 +554,65 @@ onMounted(async () => {
 .voltar svg {
   width: 18px;
   height: 18px;
+}
+
+.mais-opcoes {
+  position: relative;
+}
+
+.mais-opcoes > .botao {
+  color: var(--texto-suave);
+}
+
+.fora {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+}
+
+.menu-opcoes {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 41;
+  min-width: 220px;
+  padding: 6px;
+  border-radius: var(--raio);
+  box-shadow: var(--sombra);
+}
+
+.menu-opcoes button {
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: var(--raio-p);
+  background: none;
+  color: var(--texto);
+  font: inherit;
+  font-size: 0.92rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menu-opcoes button:hover,
+.menu-opcoes button:focus-visible {
+  background: var(--linha);
+}
+
+.relato {
+  display: grid;
+  gap: 12px;
+}
+
+.relato p {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.relato textarea {
+  resize: vertical;
+  line-height: 1.5;
 }
 
 .cabeca {

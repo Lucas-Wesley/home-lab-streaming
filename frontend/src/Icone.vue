@@ -84,6 +84,9 @@ defineProps({ nome: { type: String, required: true } })
     </template>
     <path v-else-if="nome === 'favorito'" d="M12 20s-7-4.35-7-10a4 4 0 017-2.65A4 4 0 0119 10c0 5.65-7 10-7 10z" />
     <path v-else-if="nome === 'favorito-cheio'" d="M12 20s-7-4.35-7-10a4 4 0 017-2.65A4 4 0 0119 10c0 5.65-7 10-7 10z" fill="currentColor" />
+    <template v-else-if="nome === 'mais-opcoes'">
+      <circle cx="5.5" cy="12" r="1.2" fill="currentColor" /><circle cx="12" cy="12" r="1.2" fill="currentColor" /><circle cx="18.5" cy="12" r="1.2" fill="currentColor" />
+    </template>
     <path v-else-if="nome === 'atualizar'" d="M19.5 12a7.5 7.5 0 11-2.2-5.3M19.5 4.5v4h-4" />
   </svg>
 </template>

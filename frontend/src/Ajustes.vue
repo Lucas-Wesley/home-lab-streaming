@@ -1,6 +1,7 @@
 <script setup>
 import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue'
 import Icone from './Icone.vue'
+import Relatos from './Relatos.vue'
 import Sugestoes from './Sugestoes.vue'
 import { api } from './api.js'
 import { carregarTelas, telas } from './telas.js'
@@ -18,6 +19,7 @@ const SECOES = [
   { id: 'torrents', nome: 'Busca de torrents', descricao: 'A conexão com o Prowlarr e os indexadores.' },
   { id: 'tmdb', nome: 'Filmes e séries (TMDB)', descricao: 'Pôsteres e temporadas na busca de torrents.' },
   { id: 'legendas', nome: 'Legendas (OpenSubtitles)', descricao: 'Legendas em português e inglês para o player e as telas.' },
+  { id: 'verificar', nome: 'Títulos para verificar', descricao: 'Os mandados pelo menu ⋯ da página do título; o Claude investiga e responde aqui.' },
   { id: 'sugestoes', nome: 'Sugestões de melhoria', descricao: 'Anote o que pode melhorar no Streaming; o Claude faz e responde aqui.' },
 ]
 const atual = computed(() => SECOES.find((s) => s.id === props.secao))
@@ -443,6 +445,11 @@ onBeforeUnmount(() => clearInterval(relogio))
       </div>
     </form>
 
+    </template>
+
+    <template v-else-if="atual?.id === 'verificar'">
+    <p class="suave explicacao">Títulos com algo estranho (capa errada, episódio que não acha torrent, opção recomendada ruim) mandados pelo menu ⋯ da página do título. Depois é só pedir ao Claude para verificar os títulos reportados: ele investiga e responde aqui.</p>
+    <Relatos />
     </template>
 
     <template v-else-if="atual?.id === 'sugestoes'">

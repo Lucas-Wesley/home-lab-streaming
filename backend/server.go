@@ -101,6 +101,10 @@ func newServer(a *app, web fs.FS, version string) http.Handler {
 	mux.HandleFunc("PUT /api/sugestoes/{id}", a.handleGuardarSugestao)
 	mux.HandleFunc("PATCH /api/sugestoes/{id}", a.handleMarcarSugestao)
 	mux.HandleFunc("DELETE /api/sugestoes/{id}", a.handleApagarSugestao)
+	mux.HandleFunc("GET /api/relatos", a.handleRelatos) // títulos para verificar (S37)
+	mux.HandleFunc("PUT /api/relatos/{id}", a.handleGuardarRelato)
+	mux.HandleFunc("PATCH /api/relatos/{id}", a.handleMarcarRelato)
+	mux.HandleFunc("DELETE /api/relatos/{id}", a.handleApagarRelato)
 
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		erroJSON(w, http.StatusNotFound, "não encontrado")

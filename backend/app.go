@@ -37,7 +37,7 @@ func configDoAmbiente() config {
 		addrTelas:           env("ADDR_TELAS", ":8081"),
 		intervaloDoCatalogo: intervalo,
 		ntfy:                env("NTFY_URL", ""),
-		link:                strings.TrimRight(env("STREAMING_LINK", "https://192.168.1.20:8446"), "/"),
+		link:                strings.TrimRight(env("STREAMING_LINK", "https://streaming.internal"), "/"),
 	}
 }
 

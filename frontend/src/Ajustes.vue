@@ -351,7 +351,7 @@ onBeforeUnmount(() => clearInterval(relogio))
     <template v-else-if="atual?.id === 'torrents'">
     <p class="suave explicacao">
       A busca da aba Torrents pergunta ao Prowlarr, que fica no servidor. Os indexadores são cadastrados na interface dele, em
-      <a href="https://192.168.1.20:8448" target="_blank" rel="noopener">192.168.1.20:8448</a>.
+      <a href="https://prowlarr.internal" target="_blank" rel="noopener">prowlarr.internal</a>.
     </p>
     <template v-if="prowlarr?.configurado && !mudandoProwlarr">
       <dl class="dados">

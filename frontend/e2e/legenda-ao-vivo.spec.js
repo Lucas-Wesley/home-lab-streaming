@@ -49,14 +49,54 @@ test('entre duas falas, nenhuma em destaque e a próxima espera no meio', async 
   await expect.poll(() => noMeio(page)).toBe('Fala número 22')
 })
 
-test('com uma fala escolhida, as ações ficam numa linha só, mesmo no celular estreito', async ({ page }) => {
+test('com uma fala escolhida, as ações ficam em duas linhas organizadas, mesmo no celular estreito', async ({ page }) => {
   await abrir(page, 40.5, { flashcards: true, audio: true, largura: 360 })
   await page.locator('.fala', { hasText: 'Fala número 21' }).click()
-  const botoes = page.locator('.acoes-da-legenda .botao')
-  await expect(botoes).toHaveText(['Voltar ao ponto', 'Gerar flashcard', 'Com áudio', '✕'])
-  const topos = await botoes.evaluateAll((bs) => bs.map((b) => Math.round(b.getBoundingClientRect().top)))
-  expect(new Set(topos).size).toBe(1)
-  await page.locator('.acoes-da-legenda').screenshot({ path: process.env.FOTO || 'test-results/acoes.png' })
+  const linhas = page.locator('.acoes-da-legenda .linha')
+  await expect(linhas.nth(0).locator('.botao')).toHaveText(['Tocar desta fala', 'Voltar ao ponto'])
+  await expect(linhas.nth(1).locator('.botao')).toHaveText(['Gerar flashcard', 'Com áudio', '✕'])
+  for (const linha of await linhas.all()) {
+    const topos = await linha.locator('.botao').evaluateAll((bs) => bs.map((b) => Math.round(b.getBoundingClientRect().top)))
+    expect(new Set(topos).size).toBe(1)
+  }
+  await page.locator('.legenda-ao-vivo').screenshot({ path: process.env.FOTO || 'test-results/acoes.png' })
+})
+
+test('"Voltar ao ponto" solta a fala escolhida e as ações do cartão somem', async ({ page }) => {
+  await abrir(page, 40.5, { flashcards: true, audio: true })
+  await page.locator('.fala', { hasText: 'Fala número 5' }).click()
+  await page.getByRole('button', { name: 'Voltar ao ponto' }).click()
+  await expect(page.locator('.fala.escolhida')).toHaveCount(0)
+  await expect(page.locator('.acoes-da-legenda .botao')).toHaveCount(0)
+  await expect.poll(() => noMeio(page)).toBe('Fala número 21')
+})
+
+test('"Tocar desta fala" leva o vídeo à fala escolhida e toca', async ({ page }) => {
+  await abrir(page, 40.5)
+  const comandos = []
+  await page.route('**/api/telas/*/comando', (r) => {
+    comandos.push(r.request().postDataJSON())
+    r.fulfill({ json: {} })
+  })
+  await page.locator('.fala', { hasText: 'Fala número 5' }).click() // de 8 a 9 s
+  await page.getByRole('button', { name: 'Tocar desta fala' }).click()
+  await expect.poll(() => comandos).toEqual([
+    { comando: 'ir', valor: 7.5 },
+    { comando: 'continuar', valor: 0 },
+  ])
+})
+
+test('"Ampliar" abre a legenda na tela inteira, com as ações embaixo', async ({ page }) => {
+  await abrir(page, 40.5, { flashcards: true, largura: 360 })
+  await page.getByRole('button', { name: 'Ampliar a legenda' }).click()
+  const caixa = await page.locator('.legenda-ao-vivo.ampliada').boundingBox()
+  expect(caixa.height).toBeGreaterThan(800)
+  await expect(page.locator('.fala.atual')).toHaveText('Fala número 21')
+  await page.locator('.fala', { hasText: 'Fala número 22' }).click()
+  await expect(page.getByRole('button', { name: 'Gerar flashcard' })).toBeInViewport()
+  await page.screenshot({ path: process.env.FOTO2 || 'test-results/ampliada.png' })
+  await page.getByRole('button', { name: 'Fechar a legenda ampliada' }).click()
+  await expect(page.locator('.legenda-ao-vivo.ampliada')).toHaveCount(0)
 })
 
 test('"Com áudio" manda o trecho da fala junto', async ({ page }) => {
@@ -76,5 +116,5 @@ test('"Com áudio" manda o trecho da fala junto', async ({ page }) => {
 test('sem como cortar o áudio, só "Gerar flashcard"', async ({ page }) => {
   await abrir(page, 40.5, { flashcards: true })
   await page.locator('.fala', { hasText: 'Fala número 21' }).click()
-  await expect(page.locator('.acoes-da-legenda .botao')).toHaveText(['Voltar ao ponto', 'Gerar flashcard', '✕'])
+  await expect(page.locator('.acoes-da-legenda .botao')).toHaveText(['Tocar desta fala', 'Voltar ao ponto', 'Gerar flashcard', '✕'])
 })

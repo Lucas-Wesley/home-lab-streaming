@@ -86,6 +86,20 @@ function soltarBarra() {
   enviar('ir', alvo).finally(() => (arrastando.value = null))
 }
 
+// "Tocar desta fala" (S40): o vídeo vai para a fala escolhida na legenda e toca, mesmo se estava pausado.
+async function tocarDaFala(segundos) {
+  ocupado.value = true
+  try {
+    await comandar(props.id, 'ir', segundos)
+    if (!tocando.value) await comandar(props.id, 'continuar')
+    await lerEstado()
+  } catch (e) {
+    recado(e.message, true)
+  } finally {
+    ocupado.value = false
+  }
+}
+
 function mudarVolume(delta) {
   const atual = estado.value?.volume ?? 0
   const novo = Math.max(0, Math.min(100, atual + delta))
@@ -217,7 +231,17 @@ onBeforeUnmount(() => {
         <template v-else-if="parada">Escolha algo no Início e toque no nome desta tela.</template>
       </p>
 
-      <LegendaAoVivo v-if="sessao && !aoVivo" :key="sessao.chave" :chave="sessao.chave" :posicao="posicaoAoVivo" :versao="versaoDaLegenda" @falas="temLegenda = $event" />
+      <LegendaAoVivo
+        v-if="sessao && !aoVivo"
+        :key="sessao.chave"
+        :chave="sessao.chave"
+        :posicao="posicaoAoVivo"
+        :versao="versaoDaLegenda"
+        :tocando="tocando"
+        @falas="temLegenda = $event"
+        @ir="tocarDaFala"
+        @alternar="enviar(tocando ? 'pausar' : 'continuar')"
+      />
 
       <div v-if="sessao && !aoVivo && estado?.duracao" class="tempo">
         <input

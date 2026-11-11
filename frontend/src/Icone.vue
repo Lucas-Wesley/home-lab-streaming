@@ -14,6 +14,8 @@ defineProps({ nome: { type: String, required: true } })
     </template>
     <path v-else-if="nome === 'avancar'" d="M9 5l7 7-7 7" />
     <path v-else-if="nome === 'fechar'" d="M6 6l12 12M18 6L6 18" />
+    <path v-else-if="nome === 'ampliar'" d="M14 4.5h5.5V10M19.5 4.5L13.5 10.5M10 19.5H4.5V14M4.5 19.5l6-6" />
+    <path v-else-if="nome === 'reduzir'" d="M19.5 4.5l-6 6M13.5 5.5v5h5M4.5 19.5l6-6M10.5 18.5v-5h-5" />
     <template v-else-if="nome === 'alerta'">
       <path d="M12 4.5l8.5 15h-17z" />
       <path d="M12 10.5v4M12 17.2v.1" />

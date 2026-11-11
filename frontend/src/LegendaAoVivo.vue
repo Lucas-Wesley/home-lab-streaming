@@ -1,5 +1,6 @@
 <script setup>
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import Icone from './Icone.vue'
 import { api } from './api.js'
 import { enderecoDaLegenda, falaAtual, lerVTT } from './legendas.js'
 
@@ -8,14 +9,17 @@ import { enderecoDaLegenda, falaAtual, lerVTT } from './legendas.js'
 // no meio. As de antes continuam ali para dar tempo de tocar. Tocar numa fala a escolhe (tocar na
 // vizinha junta as duas, para a frase cortada ao meio) e "Gerar flashcard" vira cartão no
 // baralho Inglês, traduzido pelo Claude; "Com áudio" leva junto o trecho da fala cortado do vídeo (S39,
-// só no torrent ou no vídeo baixado). Rolar com o dedo solta a legenda até "Voltar ao ponto".
+// só no torrent ou no vídeo baixado). Rolar com o dedo solta a legenda até "Voltar ao ponto" (a legenda
+// volta para o vídeo); "Tocar desta fala" faz o inverso: o vídeo vai para a fala escolhida (S40).
+// "Ampliar" abre a legenda na tela inteira, com letra maior, para achar e escolher as falas com calma.
 const props = defineProps({
   chave: { type: String, required: true },
   posicao: { type: Number, required: true }, // segundos, já contando o tempo desde a última leitura
   versao: { type: Number, default: 0 }, // muda quando a legenda é trocada ou ajustada no controle
+  tocando: { type: Boolean, default: false },
 })
 const recado = inject('recado')
-const emit = defineEmits(['falas'])
+const emit = defineEmits(['falas', 'ir', 'alternar'])
 
 const legenda = ref(null)
 const falas = ref([])
@@ -24,6 +28,7 @@ const mandando = ref('') // 'texto' ou 'audio' enquanto manda
 const flashcards = ref(false)
 const comAudio = ref(false) // o servidor consegue cortar o áudio deste vídeo
 const seguindo = ref(true)
+const ampliada = ref(false)
 const lista = ref(null)
 
 const atual = computed(() => falaAtual(falas.value, props.posicao))
@@ -80,7 +85,22 @@ function soltou() {
 }
 function voltarAoPonto() {
   seguindo.value = true
+  escolhidas.value = []
   centralizar()
+}
+
+// O inverso de "Voltar ao ponto": o vídeo vai para a fala escolhida (meio segundo antes, para não
+// perder o começo da voz). A escolha continua, para gerar o cartão depois de ouvir.
+function tocarDaqui() {
+  const e = escolhidas.value
+  if (!e.length) return
+  emit('ir', Math.max(0, falas.value[e[0]].inicio - 0.5))
+  seguindo.value = true
+}
+
+function ampliar(sim) {
+  ampliada.value = sim
+  nextTick(() => centralizar(false))
 }
 
 function tocar(i) {
@@ -133,23 +153,34 @@ onBeforeUnmount(() => clearInterval(relogio))
 </script>
 
 <template>
-  <section v-if="falas.length" class="legenda-ao-vivo">
-    <ol ref="lista" class="falas" @touchstart.passive="soltou" @wheel.passive="soltou">
-      <li
-        v-for="(f, i) in falas"
-        :key="i"
-        :data-i="i"
-        class="fala"
-        :class="{ atual: i === ativa, passada: i < centro && i !== ativa, escolhida: escolhidas.includes(i) }"
-        :aria-current="i === ativa ? 'true' : null"
-        @click="tocar(i)"
-      >
-        {{ f.texto }}
-      </li>
-    </ol>
+  <section v-if="falas.length" class="legenda-ao-vivo" :class="{ ampliada }">
+    <header v-if="ampliada" class="cabeca">
+      <strong>Legenda</strong>
+      <button class="botao icone" :aria-label="tocando ? 'Pausar' : 'Continuar'" @click="emit('alternar')"><Icone :nome="tocando ? 'pausar' : 'tocar'" /></button>
+      <button class="botao icone" aria-label="Fechar a legenda ampliada" @click="ampliar(false)"><Icone nome="reduzir" /></button>
+    </header>
+    <div class="caixa">
+      <ol ref="lista" class="falas" @touchstart.passive="soltou" @wheel.passive="soltou">
+        <li
+          v-for="(f, i) in falas"
+          :key="i"
+          :data-i="i"
+          class="fala"
+          :class="{ atual: i === ativa, passada: i < centro && i !== ativa, escolhida: escolhidas.includes(i) }"
+          :aria-current="i === ativa ? 'true' : null"
+          @click="tocar(i)"
+        >
+          {{ f.texto }}
+        </li>
+      </ol>
+      <button v-if="!ampliada" class="botao icone ampliar" aria-label="Ampliar a legenda" title="Ampliar a legenda" @click="ampliar(true)"><Icone nome="ampliar" /></button>
+    </div>
     <div class="acoes-da-legenda">
-      <button v-if="!seguindo" class="botao" @click="voltarAoPonto">Voltar ao ponto</button>
-      <template v-if="escolhidas.length">
+      <div v-if="escolhidas.length || !seguindo" class="linha">
+        <button v-if="escolhidas.length" class="botao" @click="tocarDaqui">Tocar desta fala</button>
+        <button v-if="!seguindo" class="botao" @click="voltarAoPonto">Voltar ao ponto</button>
+      </div>
+      <div v-if="escolhidas.length" class="linha">
         <button v-if="podeMandar" class="botao principal" :disabled="!!mandando" @click="mandar()">
           {{ mandando === 'texto' ? 'Mandando…' : escolhidas.length > 1 ? `Gerar flashcard (${escolhidas.length})` : 'Gerar flashcard' }}
         </button>
@@ -157,8 +188,8 @@ onBeforeUnmount(() => clearInterval(relogio))
           {{ mandando === 'audio' ? 'Mandando…' : 'Com áudio' }}
         </button>
         <button class="botao fechar" :disabled="!!mandando" aria-label="Cancelar" title="Cancelar" @click="escolhidas = []">✕</button>
-      </template>
-      <p v-else-if="podeMandar && seguindo" class="dica">Toque numa fala para gerar um flashcard.</p>
+      </div>
+      <p v-else-if="seguindo" class="dica">{{ podeMandar ? 'Toque numa fala para ouvir de novo ou gerar um flashcard.' : 'Toque numa fala para ouvir de novo.' }}</p>
     </div>
   </section>
 </template>
@@ -169,10 +200,14 @@ onBeforeUnmount(() => clearInterval(relogio))
   margin: 4px 0 6px;
 }
 
+.caixa {
+  position: relative;
+}
+
 .falas {
-  height: 240px;
+  height: 300px;
   margin: 0;
-  padding: 100px 4px;
+  padding: 130px 4px;
   overflow-y: auto;
   list-style: none;
   border-radius: var(--raio);
@@ -209,13 +244,70 @@ onBeforeUnmount(() => clearInterval(relogio))
   color: var(--marca);
 }
 
-/* Numa linha só: as ações dividem a largura. */
+.ampliar {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 34px;
+  height: 34px;
+  min-height: 34px;
+  background: var(--fundo);
+  opacity: 0.85;
+}
+
+/* Ampliada: a tela inteira para a legenda (os avisos continuam por cima), letra maior. */
+.ampliada {
+  position: fixed;
+  inset: 0;
+  z-index: 35;
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: max(8px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom));
+  background: var(--fundo);
+}
+
+.cabeca {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: 8px;
+}
+
+.cabeca strong {
+  flex: 1;
+  text-align: left;
+}
+
+.ampliada .caixa {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.ampliada .falas {
+  flex: 1;
+  height: auto;
+  padding: 40vh 6px;
+}
+
+.ampliada .fala {
+  padding: 10px 14px;
+  font-size: 1.2rem;
+}
+
+/* As ações em até duas linhas: ir e voltar no vídeo; o cartão. */
 .acoes-da-legenda {
+  display: grid;
+  gap: 6px;
+  min-height: 36px;
+  margin-top: 8px;
+}
+
+.linha {
   display: flex;
   gap: 6px;
   justify-content: center;
-  min-height: 36px;
-  margin-top: 8px;
 }
 
 .acoes-da-legenda .botao {

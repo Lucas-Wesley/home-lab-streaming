@@ -606,6 +606,9 @@ func (a *app) baixar(f arquivoDeTorrent) {
 			// Tira do motor antes de conferir: a biblioteca troca o nome do arquivo parcial no fim.
 			t.Drop()
 			a.db.Exec(`UPDATE torrent_arquivos SET download = 'baixado' WHERE id = ?`, f.ID)
+			if f, tg, err := a.arquivo(context.Background(), f.ID); err == nil {
+				a.avisos.avisar(aviso{Titulo: tituloDoArquivo(f, tg), Texto: "Baixado: pronto para assistir.", Link: a.cfg.link + "/#/torrent/" + f.Hash})
+			}
 			return
 		}
 		select {

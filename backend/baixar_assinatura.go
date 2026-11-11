@@ -233,6 +233,7 @@ func (a *app) baixarUm(ctx context.Context, chave string) error {
 	id, _ := strconv.ParseInt(idTexto, 10, 64)
 	falhar := func(msg string) error {
 		a.db.ExecContext(ctx, `UPDATE downloads_da_assinatura SET estado = 'erro', mensagem = ? WHERE chave = ?`, msg, chave)
+		a.avisos.avisar(aviso{Titulo: d.Titulo, Texto: "O download falhou: " + msg, Link: a.cfg.link + "/#/torrents", Urgente: true})
 		return nil
 	}
 	f, err := a.fonteDe(ctx, tipo, id, "")
@@ -274,7 +275,7 @@ func (a *app) baixarUm(ctx context.Context, chave string) error {
 		if c.Err() != nil {
 			return a.depoisDeParar(ctx, chave)
 		}
-		return falhar("O provedor não respondeu: " + err.Error())
+		return falhar("O provedor não respondeu: " + semSegredos(err).Error())
 	}
 	defer resp.Body.Close()
 	switch {
@@ -330,6 +331,7 @@ func (a *app) baixarUm(ctx context.Context, chave string) error {
 		return errOutraReproducao
 	}
 	a.db.ExecContext(ctx, `UPDATE downloads_da_assinatura SET estado = 'baixado', tamanho = ?, baixado = ?, mensagem = '' WHERE chave = ?`, baixado, baixado, chave)
+	a.avisos.avisar(aviso{Titulo: d.Titulo, Texto: "Baixado: dá para assistir sem usar a assinatura.", Link: a.cfg.link + "/#/torrents"})
 	return nil
 }
 

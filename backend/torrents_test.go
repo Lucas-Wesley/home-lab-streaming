@@ -105,6 +105,8 @@ func TestTorrentAssistirBaixarEApagar(t *testing.T) {
 	}
 
 	// Baixar o episódio 1 inteiro: o motor desliga sozinho ao terminar (o 2 ainda está na folga).
+	endereco, avisos := ntfyFalso(t)
+	e.a.avisos = novoAvisador(endereco)
 	if status, corpo := e.pedir(t, "POST", fmt.Sprintf("/api/arquivos/%d/baixar", ep1.ID), nil); status != 202 {
 		t.Fatalf("baixar: %d %s", status, corpo)
 	}
@@ -118,6 +120,9 @@ func TestTorrentAssistirBaixarEApagar(t *testing.T) {
 			t.Fatalf("não terminou de baixar: %+v", d.Arquivos[0])
 		}
 		time.Sleep(50 * time.Millisecond)
+	}
+	if m := receberAviso(t, avisos); m["title"] != "Serie Teste T1 E1" || m["click"] != "/#/torrent/"+hash {
+		t.Errorf("aviso do download (S35): %v", m)
 	}
 	caminho := e.a.caminhoBaixado(ep1)
 	if caminho == "" {

@@ -21,6 +21,10 @@ type config struct {
 	// Torrents (S17): fichas e arquivos baixados; semDHT só nos testes, para não sair da máquina.
 	pastaDosTorrents string
 	semDHT           bool
+	// Avisos no celular (S35): o ntfy do homelab, com o tópico (vazio, o app não avisa), e o endereço
+	// do app que a notificação abre.
+	ntfy string
+	link string
 }
 
 func configDoAmbiente() config {
@@ -32,12 +36,15 @@ func configDoAmbiente() config {
 		urlDasTelas:         strings.TrimRight(env("URL_DAS_TELAS", ""), "/"),
 		addrTelas:           env("ADDR_TELAS", ":8081"),
 		intervaloDoCatalogo: intervalo,
+		ntfy:                env("NTFY_URL", ""),
+		link:                strings.TrimRight(env("STREAMING_LINK", "https://192.168.1.20:8446"), "/"),
 	}
 }
 
 type app struct {
 	db        *sql.DB
 	cfg       config
+	avisos    *avisador    // nil sem NTFY_URL (S35)
 	http      *http.Client // para o provedor: segue os redirecionamentos dele
 	conexao   *conexao
 	telas     *controleDasTelas
@@ -92,6 +99,7 @@ func novoApp(db *sql.DB, cfg config) (*app, error) {
 		emFundo:                      func(f func()) { go f() },
 		motor:                        novoMotor(cfg.pastaDosTorrents, cfg.semDHT),
 		downloads:                    &downloads{progressos: map[int64]int64{}, cancelar: map[int64]context.CancelFunc{}},
+		avisos:                       novoAvisador(cfg.ntfy),
 	}
 	a.telas = novoControleDasTelas(a)
 	a.motor.aoDesligar = a.limparTrechos

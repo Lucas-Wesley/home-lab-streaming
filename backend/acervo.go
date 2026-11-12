@@ -662,7 +662,7 @@ func (a *app) audioParaOAcervo(ctx context.Context, f videoDoDocumentario, idiom
 	_, jaPuxado := os.Stat(puxado)
 	fonte, faixaNaFonte, extras, err := a.fonteDoAudio(ctx, f.chave, f.tipo, f.id, faixa, func(_, msg string) {
 		if msg != "" {
-			etapa(msg)
+			etapa(strings.Replace(msg, " (uns 15 s)", "", 1)) // um filme inteiro leva mais de um minuto
 		}
 	})
 	if err != nil {

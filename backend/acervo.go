@@ -819,6 +819,9 @@ func (a *app) mandarAoAcervo(ctx context.Context, d documentarioParaOAcervo, cam
 		Erro string `json:"erro"`
 	}
 	json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&r)
+	if resp.StatusCode == http.StatusConflict && d.Refazer {
+		return "", errors.New("O Acervo ainda está trabalhando nesta Referência (ou ela já entrou num Tema): refaça depois.")
+	}
 	if (resp.StatusCode == http.StatusCreated || resp.StatusCode == http.StatusConflict) && r.ID != "" {
 		return r.ID, nil
 	}

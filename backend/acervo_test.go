@@ -344,3 +344,22 @@ func TestLegendaDeDentroNoIdioma(t *testing.T) {
 		t.Fatal("não há legenda em português")
 	}
 }
+
+// Já estar no Acervo (409) serve num envio novo, mas não num "refazer": aí o texto não foi trocado.
+func TestConflitoDoAcervo(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		fmt.Fprint(w, `{"erro":"Este documentário já está nas Referências.","id":"ref9"}`)
+	}))
+	defer srv.Close()
+	t.Setenv("ACERVO_URL", srv.URL)
+	a := &app{http: http.DefaultClient}
+	d := documentarioParaOAcervo{Chave: "filme/1", Nome: "X", TMDB: "https://www.themoviedb.org/movie/1", Texto: "legenda"}
+	if id, err := a.mandarAoAcervo(context.Background(), d, "legenda", "l.srt", strings.NewReader("x")); err != nil || id != "ref9" {
+		t.Fatalf("envio novo: %q %v", id, err)
+	}
+	d.Refazer = true
+	if _, err := a.mandarAoAcervo(context.Background(), d, "audio", "a.ogg", strings.NewReader("x")); err == nil || !strings.Contains(err.Error(), "refaça depois") {
+		t.Fatalf("refazer recusado: %v", err)
+	}
+}

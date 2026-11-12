@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -59,6 +60,7 @@ var (
 	// Variáveis só para os testes ficarem rápidos.
 	esperaDoAcervo      = time.Minute
 	tempoMaximoDoAudio  = 3 * time.Hour
+	semDadosDoVideo     = 3 * time.Minute // sem nenhum dado do vídeo por tanto tempo, desiste
 	generosDocumentario = map[string]bool{"documentário": true, "documentary": true}
 )
 
@@ -775,9 +777,16 @@ func (a *app) audioParaOAcervo(ctx context.Context, f videoDoDocumentario, idiom
 	c, cancel := context.WithTimeout(ctx, tempoMaximoDoAudio)
 	defer cancel()
 	args := append([]string{"-v", "error", "-y"}, extras...)
+	if strings.HasPrefix(fonte, "http") {
+		// Um torrent sem fontes não manda nada e o ffmpeg esperaria para sempre (e a fila junto).
+		args = append(args, "-rw_timeout", strconv.Itoa(int(semDadosDoVideo/time.Microsecond)))
+	}
 	args = append(args, "-i", fonte, "-map", fmt.Sprintf("0:a:%d", faixaNaFonte), "-vn", "-ac", "1", "-ar", "16000",
 		"-c:a", "libopus", "-b:a", "24k", "-application", "voip", destino)
 	if out, err := exec.CommandContext(c, programaFFmpeg, args...).CombinedOutput(); err != nil {
+		if f.origem == "torrent" && f.baixado == "" && strings.Contains(string(out), "timed out") {
+			return "", fmt.Errorf("O torrent não mandou nada em %d min: parece estar sem fontes. Escolha outra versão ou baixe antes e mande de novo.", int(semDadosDoVideo.Minutes()))
+		}
 		return "", fmt.Errorf("Não consegui tirar o áudio: %v %s", err, strings.TrimSpace(string(out)))
 	}
 	if st, err := os.Stat(destino); err != nil || st.Size() < 10_000 {

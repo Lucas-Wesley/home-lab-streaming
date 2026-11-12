@@ -42,9 +42,13 @@ func tmdbDeDocumentarios(t *testing.T) *httptest.Server {
 			fmt.Fprint(w, `{"id":88,"name":"Segredos do Nilo","original_name":"Nile Secrets","original_language":"en","first_air_date":"2020-01-01",
 				"genres":[{"name":"Documentário"}],"seasons":[{"season_number":0,"episode_count":1},{"season_number":1,"name":"Temporada 1","episode_count":3}]}`)
 		case "/3/tv/88/season/1":
+			if r.URL.Query().Get("language") == "en-US" { // o nome que o TMDB não traduziu vem do inglês
+				fmt.Fprint(w, `{"episodes":[{"episode_number":1,"name":"The Source"},{"episode_number":2,"name":"The Delta","overview":"Where the Nile meets the sea."}]}`)
+				return
+			}
 			futuro := time.Now().AddDate(0, 1, 0).Format("2006-01-02")
 			fmt.Fprintf(w, `{"episodes":[{"episode_number":1,"name":"A Nascente","air_date":"2020-01-01","overview":"Onde o Nilo nasce.","runtime":1},
-				{"episode_number":2,"name":"O Delta","air_date":"2020-01-08","runtime":1},{"episode_number":3,"name":"Por vir","air_date":"%s"}]}`, futuro)
+				{"episode_number":2,"name":"Episódio 2","air_date":"2020-01-08","runtime":1},{"episode_number":3,"name":"Por vir","air_date":"%s"}]}`, futuro)
 		default:
 			http.NotFound(w, r)
 		}
@@ -212,7 +216,7 @@ func TestDocumentarioParaOAcervo(t *testing.T) {
 	}
 	r = respostaDosEnvios{}
 	e.json(t, "/api/acervo?tipo=serie&tmdb=88", &r)
-	if len(r.Envios) != 2 || r.Envios[0].Nome != "Segredos do Nilo · T1 E1 · A Nascente" || r.Envios[1].Episodio != 2 {
+	if len(r.Envios) != 2 || r.Envios[0].Nome != "Segredos do Nilo · T1 E1 · A Nascente" || r.Envios[1].Nome != "Segredos do Nilo · T1 E2 · The Delta" {
 		t.Fatalf("a temporada (sem o episódio por vir): %+v", r.Envios)
 	}
 	// Com alguém assistindo, espera a conexão (não falha).

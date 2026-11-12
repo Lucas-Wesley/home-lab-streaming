@@ -47,7 +47,9 @@ func (a *app) perguntarAoTMDB(ctx context.Context, chave, caminho string, params
 	if params == nil {
 		params = url.Values{}
 	}
-	params.Set("language", "pt-BR")
+	if params.Get("language") == "" {
+		params.Set("language", "pt-BR")
+	}
 	if reChaveV3.MatchString(chave) {
 		params.Set("api_key", chave)
 	}

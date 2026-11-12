@@ -11,9 +11,11 @@ import (
 	"log"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -240,7 +242,45 @@ func nomeDoEnvio(titulo string, temporada, episodio int, nome string) string {
 	return s
 }
 
+var reNomeGenerico = regexp.MustCompile(`^(Episódio|Episode|Capítulo)\s*\d+$`)
+
+// episodiosDaTemporada: os episódios em português; os nomes que o TMDB não traduziu ("Episódio 3")
+// e as sinopses que faltam vêm do inglês.
 func (a *app) episodiosDaTemporada(ctx context.Context, chave string, serie, temporada int) ([]episodioDoTMDB, error) {
+	eps, err := a.episodiosNoIdioma(ctx, chave, serie, temporada, "pt-BR")
+	if err != nil {
+		return nil, err
+	}
+	faltam := false
+	for _, e := range eps {
+		if e.Nome == "" || reNomeGenerico.MatchString(e.Nome) || e.Sinopse == "" {
+			faltam = true
+		}
+	}
+	if !faltam {
+		return eps, nil
+	}
+	ingles, err := a.episodiosNoIdioma(ctx, chave, serie, temporada, "en-US")
+	if err != nil {
+		return eps, nil
+	}
+	for i := range eps {
+		for _, en := range ingles {
+			if en.Numero != eps[i].Numero {
+				continue
+			}
+			if (eps[i].Nome == "" || reNomeGenerico.MatchString(eps[i].Nome)) && en.Nome != "" && !reNomeGenerico.MatchString(en.Nome) {
+				eps[i].Nome = en.Nome
+			}
+			if eps[i].Sinopse == "" {
+				eps[i].Sinopse = en.Sinopse
+			}
+		}
+	}
+	return eps, nil
+}
+
+func (a *app) episodiosNoIdioma(ctx context.Context, chave string, serie, temporada int, idioma string) ([]episodioDoTMDB, error) {
 	var d struct {
 		Episodes []struct {
 			EpisodeNumber int    `json:"episode_number"`
@@ -251,7 +291,7 @@ func (a *app) episodiosDaTemporada(ctx context.Context, chave string, serie, tem
 			Runtime       int    `json:"runtime"`
 		} `json:"episodes"`
 	}
-	if err := a.perguntarAoTMDB(ctx, chave, fmt.Sprintf("/tv/%d/season/%d", serie, temporada), nil, &d); err != nil {
+	if err := a.perguntarAoTMDB(ctx, chave, fmt.Sprintf("/tv/%d/season/%d", serie, temporada), url.Values{"language": {idioma}}, &d); err != nil {
 		return nil, err
 	}
 	eps := []episodioDoTMDB{}

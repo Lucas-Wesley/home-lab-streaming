@@ -150,6 +150,7 @@ type tituloDoTMDB struct {
 	Nota       float64           `json:"nota,omitempty"`
 	Generos    []string          `json:"generos,omitempty"`
 	Duracao    int               `json:"duracao,omitempty"` // minutos (filme)
+	Idioma     string            `json:"idioma,omitempty"`  // o idioma original (en, pt, fr…)
 	Temporadas []temporadaDoTMDB `json:"temporadas,omitempty"`
 	ImdbID     string            `json:"imdb_id,omitempty"`
 	// Filme: quando saiu (ou sai) em digital ou disco, a primeira data em qualquer país. Antes
@@ -178,6 +179,7 @@ type resultadoDoTMDB struct {
 	Name          string  `json:"name"`
 	OriginalTitle string  `json:"original_title"`
 	OriginalName  string  `json:"original_name"`
+	OriginalLang  string  `json:"original_language"`
 	ReleaseDate   string  `json:"release_date"`
 	FirstAirDate  string  `json:"first_air_date"`
 	PosterPath    string  `json:"poster_path"`
@@ -191,7 +193,7 @@ type resultadoDoTMDB struct {
 func (r resultadoDoTMDB) titulo(tipo string) tituloDoTMDB {
 	t := tituloDoTMDB{Tipo: tipo, ID: r.ID, Titulo: primeiro(r.Title, r.Name), Original: primeiro(r.OriginalTitle, r.OriginalName),
 		Ano: reAno.FindString(primeiro(r.ReleaseDate, r.FirstAirDate)), Sinopse: r.Overview, Nota: r.VoteAverage, EstreiaEm: primeiro(r.ReleaseDate, r.FirstAirDate),
-		votos: r.VoteCount, popularidade: r.Popularity}
+		votos: r.VoteCount, popularidade: r.Popularity, Idioma: r.OriginalLang}
 	if t.Original == t.Titulo {
 		t.Original = ""
 	}

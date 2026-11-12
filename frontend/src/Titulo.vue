@@ -6,6 +6,7 @@ import Folha from './Folha.vue'
 import Icone from './Icone.vue'
 import OpcaoDaAssinatura from './OpcaoDaAssinatura.vue'
 import OpcaoDeTorrent from './OpcaoDeTorrent.vue'
+import { andando, ehDocumentario as generosDeDocumentario, estadoDoEnvio, lancados } from './acervo.js'
 import { aosPoucos, api, lembrar } from './api.js'
 import { tamanho } from './tamanho.js'
 import { ajusteDaVerificacao, carregarVerificacoes, recomendavel, verificacoes, verificar } from './verificacoes.js'
@@ -42,6 +43,10 @@ const menuAberto = ref(false)
 const relatando = ref(false) // a folha "Mandar para verificação" aberta
 const textoDoRelato = ref('')
 const enviandoRelato = ref(false)
+// Documentários para o Acervo (S41): o que já foi e a folha de mandar.
+const acervo = ref({ disponivel: false, envios: [] })
+const folhaDoAcervo = ref(false)
+const mandandoAoAcervo = ref(false)
 const recado = inject('recado')
 const saindo = new AbortController() // a página fechou: as buscas param
 onBeforeUnmount(() => saindo.abort())
@@ -108,6 +113,51 @@ const listaDeEpisodios = computed(() => {
 const episodioAberto = computed(() => (numeroAberto.value ? listaDeEpisodios.value.find((e) => e.numero === numeroAberto.value) : null))
 
 const hoje = new Date().toISOString().slice(0, 10)
+
+const ehDocumentario = computed(() => generosDeDocumentario(titulo.value?.generos))
+const envioDo = (t, n) => acervo.value.envios.find((e) => e.temporada === t && e.episodio === n) || null
+const envioDoFilme = computed(() => envioDo(0, 0) || acervo.value.envios.find((e) => !e.temporada && !e.episodio) || null)
+const temporadasDoAcervo = computed(() => temporadas.value.filter((s) => s.numero > 0))
+const episodiosDaTemporadaAberta = computed(() => lancados(episodios.value[temporada.value], hoje))
+let relogioDoAcervo = 0
+onBeforeUnmount(() => clearTimeout(relogioDoAcervo))
+async function carregarAcervo() {
+  clearTimeout(relogioDoAcervo)
+  try {
+    acervo.value = await api(`/api/acervo?tipo=${tipo}&tmdb=${id}`)
+  } catch {
+    return
+  }
+  if (andando(acervo.value.envios)) relogioDoAcervo = setTimeout(carregarAcervo, 4000)
+}
+async function mandarAoAcervo(alcance, extra = {}) {
+  mandandoAoAcervo.value = true
+  try {
+    acervo.value = await api('/api/acervo', { metodo: 'POST', corpo: { tipo, tmdb: Number(id), alcance, ...extra }, tempo: 30000 })
+    recado('Na fila para o Acervo.')
+    carregarAcervo()
+  } catch (e) {
+    recado(e.message, true)
+  } finally {
+    mandandoAoAcervo.value = false
+  }
+}
+function tentarDeNovo(e) {
+  mandarAoAcervo(e.episodio ? 'episodio' : 'titulo', { temporada: e.temporada, episodio: e.episodio })
+}
+async function tirarDaFila(e) {
+  try {
+    await api(`/api/acervo/${e.id}`, { metodo: 'DELETE' })
+    carregarAcervo()
+  } catch (erro) {
+    recado(erro.message, true)
+  }
+}
+function abrirAcervo() {
+  menuAberto.value = false
+  folhaDoAcervo.value = true
+  carregarAcervo()
+}
 const aindaNaoSaiu = (e) => e.data && e.data > hoje && !e.opcoes.length && !e.assinatura
 const dataCurta = (d) => new Date(`${d}T12:00:00`).toLocaleDateString('pt-BR', { day: 'numeric', month: 'short', year: 'numeric' })
 
@@ -365,6 +415,7 @@ onMounted(async () => {
     return
   }
   carregarAssinatura()
+  if (ehDocumentario.value) carregarAcervo()
   api(`/api/titulos/${tipo}/${id}/onde`, { tempo: 20000 })
     .then((l) => (outrosServicos.value = l))
     .catch(() => {})
@@ -385,6 +436,7 @@ onMounted(async () => {
         <template v-if="menuAberto">
           <div class="fora" @click="menuAberto = false"></div>
           <div class="menu-opcoes vidro" role="menu">
+            <button v-if="ehDocumentario && acervo.disponivel" role="menuitem" @click="abrirAcervo">Mandar para o Acervo</button>
             <button role="menuitem" @click="abrirRelato">Mandar para verificação</button>
           </div>
         </template>
@@ -463,6 +515,7 @@ onMounted(async () => {
                 <span class="nome"><span class="numero">{{ e.numero }}.</span> {{ e.nome || `Episódio ${e.numero}` }}</span>
                 <span class="detalhes">
                   <span v-if="e.assinatura" class="na-assinatura-ep"><Icone nome="canais" />Na assinatura</span>
+                  <span v-if="envioDo(temporada, e.numero)" class="no-acervo" :class="estadoDoEnvio(envioDo(temporada, e.numero)).classe">{{ estadoDoEnvio(envioDo(temporada, e.numero)).curto }}</span>
                   <span v-if="detalhesDoEpisodio(e)">{{ detalhesDoEpisodio(e) }}</span>
                 </span>
                 <span v-if="e.sinopse" class="resumo">{{ e.sinopse }}</span>
@@ -500,8 +553,54 @@ onMounted(async () => {
       </form>
     </Folha>
 
+    <Folha v-if="folhaDoAcervo" titulo="Mandar para o Acervo" @fechar="folhaDoAcervo = false">
+      <div class="acervo">
+        <p class="suave">
+          O Acervo tira do documentário o conteúdo para estudar. O texto vem da legenda no idioma original, quando há uma confiável (rápido), ou do áudio original, transcrito
+          no Acervo (alguns minutos por episódio).
+        </p>
+        <div v-if="!ehSerie" class="linha-acoes">
+          <button v-if="!envioDoFilme || envioDoFilme.estado === 'falhou'" class="botao principal" :disabled="mandandoAoAcervo" @click="mandarAoAcervo('titulo')">Mandar o filme</button>
+        </div>
+        <template v-else>
+          <div class="linha-acoes">
+            <button v-if="temporadasDoAcervo.length > 1 && temporada > 0" class="botao principal" :disabled="mandandoAoAcervo" @click="mandarAoAcervo('temporada', { temporada })">
+              Temporada {{ temporada }} inteira<template v-if="episodiosDaTemporadaAberta"> ({{ episodiosDaTemporadaAberta }} episódios)</template>
+            </button>
+            <button class="botao" :class="{ principal: temporadasDoAcervo.length <= 1 }" :disabled="mandandoAoAcervo" @click="mandarAoAcervo('tudo')">
+              Documentário inteiro<template v-if="temporadasDoAcervo.length <= 1 && episodiosDaTemporadaAberta"> ({{ episodiosDaTemporadaAberta }} episódios)</template>
+            </button>
+          </div>
+          <p class="suave nota">Para mandar um episódio só, abra o episódio. Vão um por vez, em ordem, e no Acervo ficam juntos.</p>
+        </template>
+        <ul v-if="acervo.envios.length" class="envios">
+          <li v-for="e in acervo.envios" :key="e.id">
+            <span class="nome-envio">{{ ehSerie ? e.nome.replace(`${titulo.titulo} · `, '') : titulo.titulo }}</span>
+            <span class="estado-envio" :class="estadoDoEnvio(e).classe">{{ estadoDoEnvio(e).rotulo }}</span>
+            <span v-if="e.estado === 'enviado' && e.via" class="suave via">{{ e.via }}</span>
+            <span v-if="e.estado === 'falhou'" class="erro-envio">{{ e.erro }}</span>
+            <span class="acoes-envio">
+              <a v-if="e.link" :href="e.link" target="_blank" rel="noopener">Abrir no Acervo</a>
+              <button v-if="e.estado === 'falhou'" class="link" @click="tentarDeNovo(e)">Tentar de novo</button>
+              <button v-if="e.estado === 'na_fila' || e.estado === 'falhou'" class="link suave" @click="tirarDaFila(e)">Tirar da lista</button>
+            </span>
+          </li>
+        </ul>
+      </div>
+    </Folha>
+
     <Folha v-if="episodioAberto" larga :titulo="`E${episodioAberto.numero} · ${episodioAberto.nome || `Episódio ${episodioAberto.numero}`}`" @fechar="numeroAberto = 0">
       <p v-if="episodioAberto.sinopse" class="suave sinopse-do-episodio">{{ episodioAberto.sinopse }}</p>
+      <div v-if="ehDocumentario && acervo.disponivel" class="acervo-do-episodio">
+        <template v-if="envioDo(temporada, episodioAberto.numero) && envioDo(temporada, episodioAberto.numero).estado !== 'falhou'">
+          <span class="estado-envio" :class="estadoDoEnvio(envioDo(temporada, episodioAberto.numero)).classe">{{ estadoDoEnvio(envioDo(temporada, episodioAberto.numero)).rotulo }}</span>
+          <a v-if="envioDo(temporada, episodioAberto.numero).link" :href="envioDo(temporada, episodioAberto.numero).link" target="_blank" rel="noopener">Abrir no Acervo</a>
+        </template>
+        <template v-else>
+          <button class="botao" :disabled="mandandoAoAcervo" @click="mandarAoAcervo('episodio', { temporada, episodio: episodioAberto.numero })">Mandar para o Acervo</button>
+          <span v-if="envioDo(temporada, episodioAberto.numero)" class="erro-envio">{{ envioDo(temporada, episodioAberto.numero).erro }}</span>
+        </template>
+      </div>
       <ul class="lista">
         <li v-if="episodioAberto.assinatura">
           <OpcaoDaAssinatura
@@ -597,6 +696,88 @@ onMounted(async () => {
 .menu-opcoes button:hover,
 .menu-opcoes button:focus-visible {
   background: var(--linha);
+}
+
+.acervo p {
+  margin: 0 0 12px;
+}
+
+.envios {
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.envios li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  align-items: baseline;
+  padding: 10px 0;
+  border-top: 1px solid var(--linha);
+}
+
+.nome-envio {
+  flex: 1 1 100%;
+  font-weight: 600;
+}
+
+.estado-envio,
+.no-acervo {
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.estado-envio.ok,
+.no-acervo.ok {
+  color: var(--verde);
+}
+
+.estado-envio.erro,
+.no-acervo.erro,
+.erro-envio {
+  color: var(--perigo);
+}
+
+.estado-envio.indo,
+.estado-envio.fila,
+.no-acervo.indo,
+.no-acervo.fila {
+  color: var(--marca);
+}
+
+.erro-envio,
+.via {
+  flex: 1 1 100%;
+  font-size: 0.82rem;
+}
+
+.acoes-envio {
+  display: flex;
+  gap: 14px;
+  font-size: 0.86rem;
+}
+
+.acoes-envio .link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--marca);
+  font: inherit;
+  cursor: pointer;
+}
+
+.acoes-envio .link.suave {
+  color: var(--texto-suave);
+}
+
+.acervo-do-episodio {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  align-items: center;
+  margin: 0 0 14px;
+  font-size: 0.9rem;
 }
 
 .relato {

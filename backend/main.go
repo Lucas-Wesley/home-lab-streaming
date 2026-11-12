@@ -58,7 +58,8 @@ func main() {
 	go a.limparCandidatos()
 	go a.trabalharNosDownloads(context.Background())
 	go a.trabalharNasLegendas(context.Background())
-	go a.limparTrechos() // sobras de antes de desligar o servidor
+	go a.trabalharNosEnvios(context.Background()) // documentários para o Acervo (S41)
+	go a.limparTrechos()                          // sobras de antes de desligar o servidor
 
 	web, err := fs.Sub(webDist, "web/dist")
 	if err != nil {
@@ -100,7 +101,7 @@ func abrirBanco(caminho string) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := db.Exec(esquema + esquemaDosTorrents + esquemaDasLegendas + esquemaDasVerificacoes + esquemaDasOpcoes + esquemaDosDownloadsDaAssinatura + esquemaDaLegendaGerada + esquemaDosRelatos); err != nil {
+	if _, err := db.Exec(esquema + esquemaDosTorrents + esquemaDasLegendas + esquemaDasVerificacoes + esquemaDasOpcoes + esquemaDosDownloadsDaAssinatura + esquemaDaLegendaGerada + esquemaDosRelatos + esquemaDosEnviosAoAcervo); err != nil {
 		db.Close()
 		return nil, err
 	}

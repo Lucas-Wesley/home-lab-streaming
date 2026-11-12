@@ -159,6 +159,7 @@ type videoParaLegenda struct {
 	episodio     int
 	release      string // nome do arquivo, para preferir a legenda da mesma versão
 	hash         string // hash do OpenSubtitles, quando o arquivo está inteiro no disco
+	idiomas      string // os idiomas da busca; vazio: português e inglês (D50: o original do documentário)
 }
 
 var (
@@ -300,7 +301,7 @@ var preferenciaDoIdioma = map[string]float64{"pt-BR": 300, "pt-PT": 200, "en": 1
 // parametrosDaBusca monta a busca do OpenSubtitles. Ele quer os parâmetros em ordem alfabética,
 // em minúsculas e números sem zeros à esquerda; url.Values.Encode já ordena.
 func (v videoParaLegenda) parametrosDaBusca() url.Values {
-	p := url.Values{"languages": {"en,pt-br,pt-pt"}}
+	p := url.Values{"languages": {primeiro(v.idiomas, "en,pt-br,pt-pt")}}
 	switch {
 	case v.tmdbEpisodio > 0:
 		p.Set("tmdb_id", strconv.FormatInt(v.tmdbEpisodio, 10))
@@ -340,6 +341,9 @@ func (a *app) buscarLegendas(ctx context.Context, chave string, v videoParaLegen
 	for _, l := range resposta.Data {
 		at := l.Attributes
 		idioma := map[string]string{"pt-br": "pt-BR", "pt-pt": "pt-PT", "en": "en"}[strings.ToLower(at.Language)]
+		if idioma == "" && v.idiomas != "" {
+			idioma = strings.ToLower(at.Language) // pedida em outro idioma (D50)
+		}
 		if idioma == "" || len(at.Files) == 0 {
 			continue
 		}

@@ -16,6 +16,8 @@ services:
       PARAKEET_URL: http://parakeet:8000
       # App Flashcards (S31): a frase tocada na legenda vira cartão no baralho Inglês.
       FLASHCARDS_URL: http://flashcards:8080
+      # App Acervo (S41): documentários vão para lá virar Referências.
+      ACERVO_URL: http://acervo:8080
       # A busca das telas (SSDP) fica com o procurador, que está na rede do servidor.
       PROCURADOR_DE_TELAS: http://host.docker.internal:8452
       # Avisos no celular (S35): o ntfy do homelab (homelab/ntfy), tópico "streaming".

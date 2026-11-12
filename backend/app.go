@@ -69,7 +69,9 @@ type app struct {
 	cancelarDownload             context.CancelFunc
 	// Legendas geradas pelo áudio (S29): o trabalhador acorda por aqui; liberarParaOAudio marca os
 	// vídeos cuja tela pode parar enquanto o áudio da assinatura é puxado.
-	legendasAcordar   chan struct{}
+	legendasAcordar chan struct{}
+	// Documentários para o Acervo (S41): o trabalhador dos envios acorda por aqui.
+	enviosAcordar     chan struct{}
 	liberarMu         sync.Mutex
 	liberarParaOAudio map[string]bool
 	// Jogos do dia (S33, S34): as agendas (ge, ESPN, FotMob) e o guia dos canais, guardados por um tempo.
@@ -95,6 +97,7 @@ func novoApp(db *sql.DB, cfg config) (*app, error) {
 		verificando:                  make(chan struct{}, verificacoesSimultaneas),
 		downloadsDaAssinaturaAcordar: make(chan struct{}, 1),
 		legendasAcordar:              make(chan struct{}, 1),
+		enviosAcordar:                make(chan struct{}, 1),
 		liberarParaOAudio:            map[string]bool{},
 		segredo:                      segredo,
 		agora:                        time.Now,

@@ -145,6 +145,10 @@ async function mandarAoAcervo(alcance, extra = {}) {
 function tentarDeNovo(e) {
   mandarAoAcervo(e.episodio ? 'episodio' : 'titulo', { temporada: e.temporada, episodio: e.episodio })
 }
+// A legenda resume a fala; pelo áudio vem tudo o que é dito. O Acervo troca o texto e guarda o de antes.
+function refazerPeloAudio(e) {
+  mandarAoAcervo(e.episodio ? 'episodio' : 'titulo', { temporada: e.temporada, episodio: e.episodio, pelo_audio: true })
+}
 async function tirarDaFila(e) {
   try {
     await api(`/api/acervo/${e.id}`, { metodo: 'DELETE' })
@@ -582,6 +586,7 @@ onMounted(async () => {
             <span class="acoes-envio">
               <a v-if="e.link" :href="e.link" target="_blank" rel="noopener">Abrir no Acervo</a>
               <button v-if="e.estado === 'falhou'" class="link" @click="tentarDeNovo(e)">Tentar de novo</button>
+              <button v-if="e.estado === 'enviado' && e.via?.startsWith('Legenda')" class="link suave" :disabled="mandandoAoAcervo" @click="refazerPeloAudio(e)">Refazer pelo áudio</button>
               <button v-if="e.estado === 'na_fila' || e.estado === 'falhou'" class="link suave" @click="tirarDaFila(e)">Tirar da lista</button>
             </span>
           </li>

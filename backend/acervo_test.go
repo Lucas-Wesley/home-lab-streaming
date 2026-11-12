@@ -264,6 +264,26 @@ func TestDocumentarioParaOAcervo(t *testing.T) {
 		t.Fatalf("envios da série: %+v", r.Envios)
 	}
 
+	// Refazer pelo áudio o filme que foi pela legenda: vai o áudio da assinatura, sem buscar legenda,
+	// e o Acervo troca o texto da mesma Referência.
+	e.a.db.Exec(`INSERT INTO assinatura_tmdb (tipo, id, tmdb) VALUES ('filme', 200, 77)`)
+	antes := len(*buscas)
+	if s, corpo := e.pedir(t, "POST", "/api/acervo", map[string]any{"tipo": "filme", "tmdb": 77, "pelo_audio": true}); s != http.StatusAccepted || !strings.Contains(corpo, `"pelo_audio":true`) {
+		t.Fatalf("refazer pelo áudio: %d %s", s, corpo)
+	}
+	if res := e.a.enviarProximo(context.Background()); res != enviouUm {
+		t.Fatalf("refazer: %v", res)
+	}
+	ps = pedidos()
+	if p := ps[len(ps)-1]; p.campo != "audio" || !p.dados.Refazer || p.dados.Chave != "filme/77" || len(*buscas) != antes {
+		t.Fatalf("refeito pelo áudio: %s refazer=%v buscas=%d→%d", p.campo, p.dados.Refazer, antes, len(*buscas))
+	}
+	r = respostaDosEnvios{}
+	e.json(t, "/api/acervo?tipo=filme&tmdb=77", &r)
+	if r.Envios[0].Estado != "enviado" || r.Envios[0].Via != "Áudio: assinatura" {
+		t.Fatalf("filme refeito: %+v", r.Envios[0])
+	}
+
 	// Um episódio sem legenda e sem vídeo falha com o que fazer; mandar de novo o põe na fila.
 	e.a.db.Exec(`DELETE FROM assinatura_tmdb`)
 	e.a.db.Exec(`DELETE FROM envios_ao_acervo WHERE episodio = 2`)

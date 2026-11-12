@@ -75,6 +75,7 @@ type envioAoAcervo struct {
 	AcervoID  string `json:"acervo_id,omitempty"`
 	Link      string `json:"link,omitempty"` // a Referência no Acervo
 	Erro      string `json:"erro,omitempty"`
+	PeloAudio bool   `json:"pelo_audio,omitempty"` // refazer pelo áudio: a legenda fica de fora
 }
 
 func ehDocumentario(t tituloDoTMDB) bool {
@@ -87,7 +88,7 @@ func ehDocumentario(t tituloDoTMDB) bool {
 }
 
 func (a *app) enviosDoTitulo(ctx context.Context, tipo string, tmdb int) ([]envioAoAcervo, error) {
-	rows, err := a.db.QueryContext(ctx, `SELECT id, tipo, tmdb, temporada, episodio, nome, estado, etapa, via, acervo_id, erro
+	rows, err := a.db.QueryContext(ctx, `SELECT id, tipo, tmdb, temporada, episodio, nome, estado, etapa, via, acervo_id, erro, pelo_audio
 		FROM envios_ao_acervo WHERE tipo = ? AND tmdb = ? ORDER BY temporada, episodio`, tipo, tmdb)
 	if err != nil {
 		return nil, err
@@ -96,7 +97,7 @@ func (a *app) enviosDoTitulo(ctx context.Context, tipo string, tmdb int) ([]envi
 	lista := []envioAoAcervo{}
 	for rows.Next() {
 		var e envioAoAcervo
-		if err := rows.Scan(&e.ID, &e.Tipo, &e.TMDB, &e.Temporada, &e.Episodio, &e.Nome, &e.Estado, &e.Etapa, &e.Via, &e.AcervoID, &e.Erro); err != nil {
+		if err := rows.Scan(&e.ID, &e.Tipo, &e.TMDB, &e.Temporada, &e.Episodio, &e.Nome, &e.Estado, &e.Etapa, &e.Via, &e.AcervoID, &e.Erro, &e.PeloAudio); err != nil {
 			return nil, err
 		}
 		if e.AcervoID != "" {
@@ -119,9 +120,10 @@ func (a *app) handleEnviosAoAcervo(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"disponivel": urlDoAcervo() != "", "envios": lista})
 }
 
-// handleMandarAoAcervo: POST /api/acervo {tipo, tmdb, alcance, temporada, episodio}. alcance:
-// "titulo" (o filme), "episodio", "temporada" ou "tudo". Entram na fila os que ainda não foram;
-// os que falharam voltam para a fila.
+// handleMandarAoAcervo: POST /api/acervo {tipo, tmdb, alcance, temporada, episodio, pelo_audio}.
+// alcance: "titulo" (o filme), "episodio", "temporada" ou "tudo". Entram na fila os que ainda não
+// foram; os que falharam voltam para a fila. pelo_audio (um filme ou episódio): refaz pelo áudio o
+// que foi pela legenda, e o Acervo troca o texto da mesma Referência.
 func (a *app) handleMandarAoAcervo(w http.ResponseWriter, r *http.Request) {
 	var p struct {
 		Tipo      string `json:"tipo"`
@@ -129,6 +131,7 @@ func (a *app) handleMandarAoAcervo(w http.ResponseWriter, r *http.Request) {
 		Alcance   string `json:"alcance"`
 		Temporada int    `json:"temporada"`
 		Episodio  int    `json:"episodio"`
+		PeloAudio bool   `json:"pelo_audio"`
 	}
 	if json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&p) != nil || (p.Tipo != "filme" && p.Tipo != "serie") || p.TMDB <= 0 {
 		erroJSON(w, http.StatusBadRequest, "Pedido inválido.")
@@ -205,6 +208,14 @@ func (a *app) handleMandarAoAcervo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	agora := a.carimbo()
+	if p.PeloAudio && len(alvos) == 1 {
+		x := alvos[0]
+		if _, err := a.db.ExecContext(ctx, `UPDATE envios_ao_acervo SET estado = 'na_fila', etapa = '', erro = '', pelo_audio = 1, atualizado_em = ?
+			WHERE tipo = ? AND tmdb = ? AND temporada = ? AND episodio = ? AND estado IN ('enviado', 'falhou')`, agora, p.Tipo, p.TMDB, x.temporada, x.episodio); err != nil {
+			falha(w, err)
+			return
+		}
+	}
 	for _, x := range alvos {
 		if _, err := a.db.ExecContext(ctx, `INSERT INTO envios_ao_acervo (tipo, tmdb, temporada, episodio, nome, estado, criado_em, atualizado_em)
 			VALUES (?, ?, ?, ?, ?, 'na_fila', ?, ?)
@@ -346,8 +357,8 @@ const (
 // fila e espera.
 func (a *app) enviarProximo(ctx context.Context) resultadoDoEnvio {
 	var e envioAoAcervo
-	err := a.db.QueryRowContext(ctx, `SELECT id, tipo, tmdb, temporada, episodio, nome FROM envios_ao_acervo WHERE estado = 'na_fila' ORDER BY id LIMIT 1`).
-		Scan(&e.ID, &e.Tipo, &e.TMDB, &e.Temporada, &e.Episodio, &e.Nome)
+	err := a.db.QueryRowContext(ctx, `SELECT id, tipo, tmdb, temporada, episodio, nome, pelo_audio, acervo_id FROM envios_ao_acervo WHERE estado = 'na_fila' ORDER BY id LIMIT 1`).
+		Scan(&e.ID, &e.Tipo, &e.TMDB, &e.Temporada, &e.Episodio, &e.Nome, &e.PeloAudio, &e.AcervoID)
 	if err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
 			log.Printf("envios ao Acervo: %v", err)
@@ -399,6 +410,7 @@ type documentarioParaOAcervo struct {
 	Texto           string `json:"texto"`
 	Legenda         string `json:"legenda,omitempty"`
 	IdiomaDoTexto   string `json:"idioma_texto,omitempty"`
+	Refazer         bool   `json:"refazer,omitempty"` // troca o texto da Referência que já existe
 }
 
 // enviarAoAcervo faz um filme ou episódio: acha o texto (legenda ou áudio) e manda. Devolve por onde
@@ -434,10 +446,16 @@ func (a *app) enviarAoAcervo(ctx context.Context, e envioAoAcervo, etapa func(st
 		}
 	}
 	fontes := a.videosDoDocumentario(ctx, t, e)
+	d.Refazer = e.PeloAudio && e.AcervoID != ""
 
-	// 1 e 2: a legenda no idioma original.
-	etapa("Procurando a legenda no idioma original…")
-	if srt, qual, origem := a.legendaParaOAcervo(ctx, t, e, fontes, float64(d.Duracao)); srt != nil {
+	// 1 e 2: a legenda no idioma original (menos quando é para refazer pelo áudio).
+	var srt []byte
+	var qual, origem string
+	if !e.PeloAudio {
+		etapa("Procurando a legenda no idioma original…")
+		srt, qual, origem = a.legendaParaOAcervo(ctx, t, e, fontes, float64(d.Duracao))
+	}
+	if srt != nil {
 		d.Texto, d.Legenda, d.IdiomaDoTexto, d.Origem = "legenda", qual, t.Idioma, origem
 		etapa("Mandando a legenda ao Acervo…")
 		id, err := a.mandarAoAcervo(ctx, d, "legenda", "legenda.srt", bytes.NewReader(srt))

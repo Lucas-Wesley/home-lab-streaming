@@ -395,6 +395,7 @@ type documentarioParaOAcervo struct {
 	Nome            string `json:"nome"`
 	Original        string `json:"original,omitempty"`
 	Ano             string `json:"ano,omitempty"`
+	Direcao         string `json:"direcao,omitempty"` // filme: quem dirigiu; série: quem criou
 	Sinopse         string `json:"sinopse,omitempty"`
 	Idioma          string `json:"idioma,omitempty"`
 	Temporada       int    `json:"temporada,omitempty"`
@@ -445,6 +446,7 @@ func (a *app) enviarAoAcervo(ctx context.Context, e envioAoAcervo, etapa func(st
 			}
 		}
 	}
+	d.Direcao = a.direcaoDoTitulo(ctx, chave, e.Tipo, e.TMDB)
 	fontes := a.videosDoDocumentario(ctx, t, e)
 	d.Refazer = e.PeloAudio && e.AcervoID != ""
 
@@ -507,6 +509,42 @@ func (a *app) enviarAoAcervo(ctx context.Context, e envioAoAcervo, etapa func(st
 	etapa("Mandando o áudio ao Acervo…")
 	id, err := a.mandarAoAcervo(ctx, d, "audio", "audio.ogg", arq)
 	return via, id, err
+}
+
+// direcaoDoTitulo: quem dirigiu o filme ou criou a série (até três nomes), para o texto atribuir a
+// leitura do documentário a alguém. Sem resposta, vazio.
+func (a *app) direcaoDoTitulo(ctx context.Context, chave, tipo string, id int) string {
+	var nomes []string
+	if tipo == "filme" {
+		var c struct {
+			Crew []struct {
+				Name string `json:"name"`
+				Job  string `json:"job"`
+			} `json:"crew"`
+		}
+		if a.perguntarAoTMDB(ctx, chave, fmt.Sprintf("/movie/%d/credits", id), nil, &c) == nil {
+			for _, p := range c.Crew {
+				if p.Job == "Director" && !contem(nomes, p.Name) {
+					nomes = append(nomes, p.Name)
+				}
+			}
+		}
+	} else {
+		var s struct {
+			CriadaPor []struct {
+				Name string `json:"name"`
+			} `json:"created_by"`
+		}
+		if a.perguntarAoTMDB(ctx, chave, fmt.Sprintf("/tv/%d", id), nil, &s) == nil {
+			for _, p := range s.CriadaPor {
+				nomes = append(nomes, p.Name)
+			}
+		}
+	}
+	if len(nomes) > 3 {
+		nomes = nomes[:3]
+	}
+	return strings.Join(nomes, ", ")
 }
 
 // ---------- De onde vem ----------

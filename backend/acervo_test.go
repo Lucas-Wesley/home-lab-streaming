@@ -36,6 +36,8 @@ func tmdbDeDocumentarios(t *testing.T) *httptest.Server {
 		case "/3/movie/77":
 			fmt.Fprint(w, `{"id":77,"title":"A Era das Pirâmides","original_title":"Age of Pyramids","original_language":"en","release_date":"2015-01-01",
 				"runtime":2,"overview":"Como o Egito ergueu as pirâmides.","poster_path":"/p.jpg","genres":[{"name":"Documentário"},{"name":"História"}]}`)
+		case "/3/movie/77/credits":
+			fmt.Fprint(w, `{"crew":[{"name":"Ana Diretora","job":"Director"},{"name":"Outro","job":"Editor"}]}`)
 		case "/3/movie/1396":
 			fmt.Fprint(w, `{"id":1396,"title":"Um Drama","original_language":"en","genres":[{"name":"Drama"}]}`)
 		case "/3/tv/88":
@@ -189,7 +191,7 @@ func TestDocumentarioParaOAcervo(t *testing.T) {
 	}
 	d := ps[0].dados
 	if d.Chave != "filme/77" || d.Nome != "A Era das Pirâmides" || d.Original != "Age of Pyramids" || d.Idioma != "en" || d.IdiomaDoTexto != "en" ||
-		d.Duracao != 120 || d.TMDB != "https://www.themoviedb.org/movie/77" || d.Texto != "legenda" || !strings.Contains(d.Legenda, "Age.of.Pyramids.2015.WEB") ||
+		d.Duracao != 120 || d.Direcao != "Ana Diretora" || d.TMDB != "https://www.themoviedb.org/movie/77" || d.Texto != "legenda" || !strings.Contains(d.Legenda, "Age.of.Pyramids.2015.WEB") ||
 		!strings.HasSuffix(d.Capa, "/w500/p.jpg") || !strings.HasSuffix(d.Link, "/#/titulo/filme/77") || d.Origem != "opensubtitles" {
 		t.Fatalf("dados: %+v", d)
 	}

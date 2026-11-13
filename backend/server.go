@@ -82,6 +82,7 @@ func newServer(a *app, web fs.FS, version string) http.Handler {
 
 	mux.HandleFunc("GET /api/meus-videos", a.handleMeusVideos) // S42: vídeos próprios, do Telegram
 	mux.HandleFunc("POST /api/meus-videos/telegram", a.handlePedirAoTelegram)
+	mux.HandleFunc("POST /api/meus-videos/telegram/rastrear", a.handleRastrear)
 	mux.HandleFunc("DELETE /api/meus-videos/telegram/{id}", a.handleApagarPedido)
 	mux.HandleFunc("POST /api/meus-videos/telegram/{id}/retomar", a.handleRetomarPedido)
 	mux.HandleFunc("PATCH /api/meus-videos/{id}", a.handleMudarMeuVideo)

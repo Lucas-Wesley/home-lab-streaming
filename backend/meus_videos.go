@@ -16,6 +16,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // Meus vídeos (S42): vídeos próprios (viagens, trabalho) guardados no servidor, em pastas. Chegam
@@ -32,7 +34,8 @@ CREATE TABLE IF NOT EXISTS meus_videos (
 	tamanho   INTEGER NOT NULL DEFAULT 0,
 	duracao   REAL NOT NULL DEFAULT 0,
 	origem    TEXT NOT NULL DEFAULT '', -- o link da mensagem do Telegram, quando veio de lá
-	criado_em TEXT NOT NULL
+	criado_em TEXT NOT NULL, -- a data da mensagem, quando veio do Telegram
+	ordem     INTEGER NOT NULL DEFAULT 0 -- o número da mensagem: desempata a ordem
 );
 CREATE TABLE IF NOT EXISTS pedidos_do_telegram (
 	id        INTEGER PRIMARY KEY,
@@ -43,7 +46,8 @@ CREATE TABLE IF NOT EXISTS pedidos_do_telegram (
 	estado    TEXT NOT NULL DEFAULT 'na fila', -- na fila, baixando, pronto, erro
 	mensagem  TEXT NOT NULL DEFAULT '',
 	baixado   INTEGER NOT NULL DEFAULT 0,
-	videos    INTEGER NOT NULL DEFAULT 0,
+	videos    INTEGER NOT NULL DEFAULT 0, -- já guardados
+	total     INTEGER NOT NULL DEFAULT 0, -- quantos o grupo tem para baixar
 	criado_em TEXT NOT NULL
 );
 `
@@ -71,6 +75,7 @@ type pedidoDoTelegram struct {
 	Mensagem string `json:"mensagem,omitempty"`
 	Baixado  int64  `json:"baixado"`
 	Videos   int    `json:"videos"`
+	Total    int    `json:"total"`
 	CriadoEm string `json:"criado_em"`
 }
 
@@ -159,7 +164,8 @@ func (a *app) sincronizarMeusVideos(ctx context.Context) error {
 				continue
 			}
 			if info, err := f.Info(); err == nil {
-				noDisco[p.Name()+"/"+f.Name()] = info
+				// O macOS devolve os acentos decompostos (NFD); o banco guarda como foram escritos (NFC).
+				noDisco[norm.NFC.String(p.Name()+"/"+f.Name())] = info
 			}
 		}
 	}
@@ -172,7 +178,7 @@ func (a *app) sincronizarMeusVideos(ctx context.Context) error {
 		var id int64
 		var arq string
 		if rows.Scan(&id, &arq) == nil {
-			noBanco[arq] = id
+			noBanco[norm.NFC.String(arq)] = id
 		}
 	}
 	rows.Close()
@@ -253,7 +259,7 @@ func tirarCapa(ctx context.Context, video, capa string, duracao float64) {
 func (a *app) listarMeusVideos(ctx context.Context) ([]meuVideo, error) {
 	rows, err := a.db.QueryContext(ctx, `SELECT v.id, v.pasta, v.nome, v.arquivo, v.tamanho, v.duracao, v.origem, v.criado_em, COALESCE(p.posicao, 0)
 		FROM meus_videos v LEFT JOIN progresso p ON p.chave = 'proprio:' || v.id
-		ORDER BY v.pasta COLLATE NOCASE, v.criado_em, v.id`)
+		ORDER BY v.pasta COLLATE NOCASE, v.criado_em, v.ordem, v.id`)
 	if err != nil {
 		return nil, err
 	}
@@ -285,8 +291,8 @@ func (a *app) meuVideo(ctx context.Context, id int64) (meuVideo, error) {
 }
 
 // guardarNaPasta move o arquivo baixado para pasta/nome.ext (com " 2", " 3" se o nome já existe)
-// e o registra.
-func (a *app) guardarNaPasta(ctx context.Context, origemDoArquivo, pasta, nome, link string) (meuVideo, error) {
+// e o registra. criadoEm vazio: agora.
+func (a *app) guardarNaPasta(ctx context.Context, origemDoArquivo, pasta, nome, link, criadoEm string, ordem int64) (meuVideo, error) {
 	ext := strings.ToLower(filepath.Ext(origemDoArquivo))
 	dir := filepath.Join(a.pastaDosMeusVideos(), pasta)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -308,9 +314,9 @@ func (a *app) guardarNaPasta(ctx context.Context, origemDoArquivo, pasta, nome, 
 		return meuVideo{}, err
 	}
 	arq := pasta + "/" + final + ext
-	res, err := a.db.ExecContext(ctx, `INSERT INTO meus_videos (pasta, nome, arquivo, tamanho, origem, criado_em) VALUES (?, ?, ?, ?, ?, ?)
+	res, err := a.db.ExecContext(ctx, `INSERT INTO meus_videos (pasta, nome, arquivo, tamanho, origem, criado_em, ordem) VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (arquivo) DO UPDATE SET tamanho = excluded.tamanho, origem = excluded.origem`,
-		pasta, final, arq, info.Size(), link, a.carimbo())
+		pasta, final, arq, info.Size(), link, primeiro(criadoEm, a.carimbo()), ordem)
 	if err != nil {
 		return meuVideo{}, err
 	}
@@ -345,7 +351,10 @@ func moverArquivo(de, para string) error {
 
 // ---------- A fila do Telegram ----------
 
-// O tdl guarda a sessão num banco que só um processo abre por vez: um pedido por vez.
+// O tdl guarda a sessão num banco que só um processo abre por vez: um tdl por vez com a sessão de
+// verdade (tdlMu). O rastreio, se a fila está ocupada, usa uma cópia da sessão.
+var tdlMu sync.Mutex
+
 func (a *app) trabalharNoTelegram(ctx context.Context) {
 	a.db.ExecContext(ctx, `UPDATE pedidos_do_telegram SET estado = 'na fila' WHERE estado = 'baixando'`)
 	for {
@@ -371,24 +380,28 @@ func (a *app) acordarTelegram() {
 	}
 }
 
-func (a *app) pedidoDe(ctx context.Context, id int64) (pedidoDoTelegram, error) {
+const colunasDoPedido = `id, link, nome, pasta, tudo, estado, mensagem, baixado, videos, total, criado_em`
+
+func lerPedido(s interface{ Scan(...any) error }) (pedidoDoTelegram, error) {
 	var p pedidoDoTelegram
-	err := a.db.QueryRowContext(ctx, `SELECT id, link, nome, pasta, tudo, estado, mensagem, baixado, videos, criado_em FROM pedidos_do_telegram WHERE id = ?`, id).
-		Scan(&p.ID, &p.Link, &p.Nome, &p.Pasta, &p.Tudo, &p.Estado, &p.Mensagem, &p.Baixado, &p.Videos, &p.CriadoEm)
+	err := s.Scan(&p.ID, &p.Link, &p.Nome, &p.Pasta, &p.Tudo, &p.Estado, &p.Mensagem, &p.Baixado, &p.Videos, &p.Total, &p.CriadoEm)
 	return p, err
 }
 
+func (a *app) pedidoDe(ctx context.Context, id int64) (pedidoDoTelegram, error) {
+	return lerPedido(a.db.QueryRowContext(ctx, `SELECT `+colunasDoPedido+` FROM pedidos_do_telegram WHERE id = ?`, id))
+}
+
 func (a *app) pedidosDoTelegram(ctx context.Context) ([]pedidoDoTelegram, error) {
-	rows, err := a.db.QueryContext(ctx, `SELECT id, link, nome, pasta, tudo, estado, mensagem, baixado, videos, criado_em
-		FROM pedidos_do_telegram ORDER BY id DESC LIMIT 30`)
+	rows, err := a.db.QueryContext(ctx, `SELECT `+colunasDoPedido+` FROM pedidos_do_telegram ORDER BY id DESC LIMIT 30`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	lista := []pedidoDoTelegram{}
 	for rows.Next() {
-		var p pedidoDoTelegram
-		if err := rows.Scan(&p.ID, &p.Link, &p.Nome, &p.Pasta, &p.Tudo, &p.Estado, &p.Mensagem, &p.Baixado, &p.Videos, &p.CriadoEm); err != nil {
+		p, err := lerPedido(rows)
+		if err != nil {
 			return nil, err
 		}
 		lista = append(lista, p)
@@ -396,23 +409,21 @@ func (a *app) pedidosDoTelegram(ctx context.Context) ([]pedidoDoTelegram, error)
 	return lista, rows.Err()
 }
 
-// argumentosDoTdl: a sessão fica na pasta de dados; sem barra de progresso (não há terminal).
-func (a *app) argumentosDoTdl(resto ...string) []string {
-	return append([]string{"--storage", "type=bolt,path=" + a.sessaoDoTelegram(), "--disable-progress-ps"}, resto...)
-}
-
-func (a *app) rodarTdl(ctx context.Context, args ...string) error {
-	cmd := exec.CommandContext(ctx, programaTdl(), a.argumentosDoTdl(args...)...)
-	var saida bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &saida, &saida
+// tdl roda o programa com a sessão dada; sem barra de progresso (não há terminal). Devolve a saída
+// padrão (o JSON do "chat ls"); no erro, a explicação.
+func (a *app) tdl(ctx context.Context, sessao string, args ...string) (string, error) {
+	todos := append([]string{"--storage", "type=bolt,path=" + sessao, "--disable-progress-ps"}, args...)
+	cmd := exec.CommandContext(ctx, programaTdl(), todos...)
+	var saida, erros bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &saida, &erros
 	cmd.WaitDelay = 5 * time.Second
 	if err := cmd.Run(); err != nil {
 		if ctx.Err() != nil {
-			return ctx.Err()
+			return "", ctx.Err()
 		}
-		return errors.New(explicarErroDoTdl(saida.String(), err))
+		return "", errors.New(explicarErroDoTdl(saida.String()+"\n"+erros.String(), err))
 	}
-	return nil
+	return saida.String(), nil
 }
 
 // explicarErroDoTdl traduz os erros que o Lucas pode resolver; o resto vai como veio (o fim).
@@ -445,6 +456,229 @@ func explicarErroDoTdl(saida string, err error) string {
 	return "O tdl falhou: " + err.Error()
 }
 
+// ---------- O que há no grupo ----------
+
+// mensagemDoGrupo: o que o "chat export --with-content" do tdl diz de cada mensagem com arquivo.
+type mensagemDoGrupo struct {
+	id      int64
+	arquivo string
+	data    int64 // Unix
+	texto   string
+}
+
+// listaDoGrupo guarda o JSON do tdl como veio ({"id": ..., "messages": [...]}) para devolvê-lo ao
+// "tdl dl -f" só com as mensagens escolhidas, sem perder campo nenhum.
+type listaDoGrupo struct {
+	doc       map[string]json.RawMessage
+	mensagens []map[string]any
+}
+
+func lerListaDoGrupo(caminho string) (listaDoGrupo, error) {
+	var l listaDoGrupo
+	dados, err := os.ReadFile(caminho)
+	if err != nil {
+		return l, err
+	}
+	if err := json.Unmarshal(dados, &l.doc); err != nil {
+		return l, fmt.Errorf("a lista do tdl veio num formato estranho: %w", err)
+	}
+	if err := json.Unmarshal(l.doc["messages"], &l.mensagens); err != nil {
+		return l, fmt.Errorf("a lista do tdl veio num formato estranho: %w", err)
+	}
+	return l, nil
+}
+
+func mensagemDe(m map[string]any) mensagemDoGrupo {
+	id, _ := m["id"].(float64)
+	data, _ := m["date"].(float64)
+	arquivo, _ := m["file"].(string)
+	texto, _ := m["text"].(string)
+	return mensagemDoGrupo{id: int64(id), arquivo: arquivo, data: int64(data), texto: texto}
+}
+
+// soVideos deixa na lista só os vídeos que passam no filtro, do mais antigo ao mais novo.
+func (l *listaDoGrupo) soVideos(ficar func(mensagemDoGrupo) bool) []mensagemDoGrupo {
+	ficam := []map[string]any{}
+	videos := []mensagemDoGrupo{}
+	for _, m := range l.mensagens {
+		v := mensagemDe(m)
+		if v.id > 0 && ehVideo(v.arquivo) && ficar(v) {
+			ficam = append(ficam, m)
+			videos = append(videos, v)
+		}
+	}
+	l.mensagens = ficam
+	sort.Slice(videos, func(i, j int) bool { return videos[i].id < videos[j].id })
+	return videos
+}
+
+func (l listaDoGrupo) gravar(caminho string) error {
+	b, err := json.Marshal(l.mensagens)
+	if err != nil {
+		return err
+	}
+	l.doc["messages"] = b
+	novo, err := json.Marshal(l.doc)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(caminho, novo, 0o644)
+}
+
+// exportarGrupo: as mensagens com arquivo do grupo (todas, ou de "de" a "ate"), com o texto.
+func (a *app) exportarGrupo(ctx context.Context, sessao, chat string, de, ate int64, caminho string) (listaDoGrupo, error) {
+	args := []string{"chat", "export", "-c", chat, "--with-content", "-o", caminho}
+	if de > 0 {
+		args = append(args, "-T", "id", "-i", fmt.Sprintf("%d,%d", de, ate))
+	}
+	if _, err := a.tdl(ctx, sessao, args...); err != nil {
+		return listaDoGrupo{}, err
+	}
+	return lerListaDoGrupo(caminho)
+}
+
+// nomeDoGrupo: o nome que aparece no Telegram, para sugerir a pasta.
+func (a *app) nomeDoGrupo(ctx context.Context, sessao, chat string) string {
+	if _, err := strconv.ParseInt(chat, 10, 64); err != nil {
+		return chat // grupo público: o nome do link
+	}
+	saida, err := a.tdl(ctx, sessao, "chat", "ls", "-o", "json", "-f", "ID == "+chat)
+	if err != nil {
+		return ""
+	}
+	var grupos []struct {
+		Nome string `json:"visible_name"`
+	}
+	if json.Unmarshal([]byte(saida), &grupos) != nil || len(grupos) == 0 {
+		return ""
+	}
+	return limparNome(strings.ReplaceAll(grupos[0].Nome, "_", " "))
+}
+
+var (
+	reEtiquetas    = regexp.MustCompile(`^(?:#\S+\s*)+`)
+	reNomeDeCamera = regexp.MustCompile(`(?i)^(?:\d+|(?:vid|img|video|pxl|mov|trim|signal|whatsapp video|screen[ _-]?recording|gravacao)[\w .-]*)$`)
+	fusoDeCasa     = func() *time.Location {
+		if l, err := time.LoadLocation("America/Sao_Paulo"); err == nil {
+			return l
+		}
+		return time.Local
+	}()
+)
+
+// nomeDoVideo dá um nome ao vídeo sem o Lucas escrever: a primeira linha do texto da mensagem (sem
+// as #etiquetas); sem texto, o nome do arquivo; se o nome é de câmera ("VID_2026…", só números),
+// a data da mensagem.
+func nomeDoVideo(texto, arquivo string, data int64) string {
+	for _, linha := range strings.Split(texto, "\n") {
+		if n := limparNome(reEtiquetas.ReplaceAllString(strings.TrimSpace(linha), "")); n != "" {
+			if r := []rune(n); len(r) > 80 {
+				n = string(r[:80])
+				if i := strings.LastIndex(n, " "); i > 40 {
+					n = n[:i]
+				}
+				n = strings.TrimRight(n, " ,.;:-") + "…"
+			}
+			return n
+		}
+	}
+	base := limparNome(strings.TrimSuffix(arquivo, filepath.Ext(arquivo)))
+	if base != "" && !reNomeDeCamera.MatchString(base) {
+		return base
+	}
+	if data > 0 {
+		return "Vídeo de " + time.Unix(data, 0).In(fusoDeCasa).Format("02-01-2006 às 15h04")
+	}
+	return primeiro(base, "Vídeo")
+}
+
+// jaBaixadas: as mensagens do grupo que já viraram vídeo aqui (pela origem).
+func (a *app) jaBaixadas(ctx context.Context, l linkDoTelegram) map[int64]bool {
+	ja := map[int64]bool{}
+	rows, err := a.db.QueryContext(ctx, `SELECT origem FROM meus_videos WHERE origem != ''`)
+	if err != nil {
+		return ja
+	}
+	defer rows.Close()
+	prefixo := strings.TrimSuffix(linkDaMensagem(l, 0), "0")
+	for rows.Next() {
+		var o string
+		if rows.Scan(&o) == nil && strings.HasPrefix(o, prefixo) {
+			if id, err := strconv.ParseInt(strings.TrimPrefix(o, prefixo), 10, 64); err == nil {
+				ja[id] = true
+			}
+		}
+	}
+	return ja
+}
+
+func linkDaMensagem(l linkDoTelegram, mensagem int64) string {
+	if _, err := strconv.ParseInt(l.chat, 10, 64); err == nil {
+		return fmt.Sprintf("https://t.me/c/%s/%d", l.chat, mensagem)
+	}
+	return fmt.Sprintf("https://t.me/%s/%d", l.chat, mensagem)
+}
+
+// sessaoParaRastrear: a sessão de verdade, se a fila está parada; se não, uma cópia (o banco do
+// tdl só abre num processo por vez). Devolve também o que fazer no fim.
+func (a *app) sessaoParaRastrear() (string, func(), error) {
+	if tdlMu.TryLock() {
+		return a.sessaoDoTelegram(), tdlMu.Unlock, nil
+	}
+	dir, err := os.MkdirTemp("", "sessao-tdl-")
+	if err != nil {
+		return "", nil, err
+	}
+	copia := filepath.Join(dir, "sessao")
+	if err := os.MkdirAll(copia, 0o700); err != nil {
+		return "", nil, err
+	}
+	arquivos, _ := os.ReadDir(a.sessaoDoTelegram())
+	for _, f := range arquivos {
+		if dados, err := os.ReadFile(filepath.Join(a.sessaoDoTelegram(), f.Name())); err == nil {
+			os.WriteFile(filepath.Join(copia, f.Name()), dados, 0o600)
+		}
+	}
+	return copia, func() { os.RemoveAll(dir) }, nil
+}
+
+type videoDoGrupo struct {
+	Mensagem int64  `json:"mensagem"`
+	Nome     string `json:"nome"`
+	Data     string `json:"data,omitempty"`
+	Ja       bool   `json:"ja"`
+}
+
+// rastrearGrupo: os vídeos do grupo, com o nome que cada um vai ganhar, e o nome do grupo.
+func (a *app) rastrearGrupo(ctx context.Context, l linkDoTelegram) (string, []videoDoGrupo, error) {
+	sessao, liberar, err := a.sessaoParaRastrear()
+	if err != nil {
+		return "", nil, err
+	}
+	defer liberar()
+	dir, err := os.MkdirTemp("", "rastreio-")
+	if err != nil {
+		return "", nil, err
+	}
+	defer os.RemoveAll(dir)
+	lista, err := a.exportarGrupo(ctx, sessao, l.chat, 0, 0, filepath.Join(dir, "lista.json"))
+	if err != nil {
+		return "", nil, err
+	}
+	ja := a.jaBaixadas(ctx, l)
+	videos := []videoDoGrupo{}
+	for _, m := range lista.soVideos(func(mensagemDoGrupo) bool { return true }) {
+		v := videoDoGrupo{Mensagem: m.id, Nome: nomeDoVideo(m.texto, m.arquivo, m.data), Ja: ja[m.id]}
+		if m.data > 0 {
+			v.Data = time.Unix(m.data, 0).UTC().Format(time.RFC3339)
+		}
+		videos = append(videos, v)
+	}
+	return a.nomeDoGrupo(ctx, sessao, l.chat), videos, nil
+}
+
+// ---------- Baixar ----------
+
 var (
 	pedidosMu       sync.Mutex
 	cancelarPedidos = map[int64]context.CancelFunc{}
@@ -455,9 +689,10 @@ func (a *app) baixarDoTelegram(ctx context.Context, id int64) {
 	if err != nil {
 		return
 	}
+	titulo := primeiro(p.Nome, p.Pasta)
 	falhar := func(msg string) {
 		a.db.ExecContext(ctx, `UPDATE pedidos_do_telegram SET estado = 'erro', mensagem = ? WHERE id = ?`, msg, id)
-		a.avisos.avisar(aviso{Titulo: primeiro(p.Nome, p.Pasta), Texto: "Não baixou do Telegram: " + msg, Link: a.cfg.link + "/#/meus-videos", Urgente: true})
+		a.avisos.avisar(aviso{Titulo: titulo, Texto: "Não baixou do Telegram: " + msg, Link: a.cfg.link + "/#/meus-videos", Urgente: true})
 	}
 	link, ok := lerLinkDoTelegram(p.Link)
 	if !ok {
@@ -468,6 +703,8 @@ func (a *app) baixarDoTelegram(ctx context.Context, id int64) {
 		falhar("O tdl não está instalado no servidor.")
 		return
 	}
+	tdlMu.Lock()
+	defer tdlMu.Unlock()
 	c, cancelar := context.WithCancel(ctx)
 	defer cancelar()
 	pedidosMu.Lock()
@@ -486,11 +723,110 @@ func (a *app) baixarDoTelegram(ctx context.Context, id int64) {
 		return
 	}
 	defer os.RemoveAll(tmp)
-	a.db.ExecContext(ctx, `UPDATE pedidos_do_telegram SET estado = 'baixando', mensagem = '', baixado = 0 WHERE id = ?`, id)
+	a.db.ExecContext(ctx, `UPDATE pedidos_do_telegram SET estado = 'baixando', mensagem = '', baixado = 0, videos = 0, total = 0 WHERE id = ?`, id)
 
-	// Enquanto o tdl baixa, o tamanho da pasta é o andamento.
-	parar := make(chan struct{})
+	sessao := a.sessaoDoTelegram()
+	modelo := "{{ .MessageID }}_{{ filenamify .FileName }}"
+	g := &guardaDoPedido{a: a, p: p, link: link, tmp: tmp, info: map[int64]mensagemDoGrupo{}}
+
+	if p.Tudo {
+		caminho := filepath.Join(tmp, ".lista.json")
+		lista, err := a.exportarGrupo(c, sessao, link.chat, 0, 0, caminho)
+		if err != nil {
+			a.depoisDoErro(ctx, c, id, err, falhar)
+			return
+		}
+		ja := a.jaBaixadas(ctx, link)
+		for _, m := range lista.soVideos(func(m mensagemDoGrupo) bool { return !ja[m.id] }) {
+			g.info[m.id] = m
+		}
+		if len(g.info) == 0 {
+			a.db.ExecContext(ctx, `UPDATE pedidos_do_telegram SET estado = 'pronto', mensagem = 'Nenhum vídeo novo no grupo.' WHERE id = ?`, id)
+			return
+		}
+		if err := lista.gravar(caminho); err != nil {
+			falhar(err.Error())
+			return
+		}
+		a.db.ExecContext(ctx, `UPDATE pedidos_do_telegram SET total = ? WHERE id = ?`, len(g.info), id)
+		// Cada vídeo vai para a pasta assim que termina: dá para assistir antes do fim, e o que
+		// já veio fica mesmo se o pedido for cancelado.
+		err = g.enquanto(ctx, func() error {
+			_, err := a.tdl(c, sessao, "dl", "-f", caminho, "-d", tmp, "--restart", "--template", modelo)
+			return err
+		})
+		if err != nil {
+			a.depoisDoErro(ctx, c, id, err, falhar)
+			return
+		}
+	} else {
+		err = g.enquanto(ctx, func() error {
+			_, err := a.tdl(c, sessao, "dl", "-u", link.limpo, "-d", tmp, "--group", "--restart", "--template", modelo)
+			return err
+		})
+		if err != nil {
+			a.depoisDoErro(ctx, c, id, err, falhar)
+			return
+		}
+		// Sem nome escolhido: o texto das mensagens dá o nome (o álbum são mensagens seguidas).
+		if baixados := videosBaixados(tmp); len(baixados) > 0 {
+			de, ate := baixados[0].mensagem, baixados[len(baixados)-1].mensagem
+			if de > 0 {
+				if lista, err := a.exportarGrupo(c, sessao, link.chat, de, ate, filepath.Join(tmp, ".lista.json")); err == nil {
+					for _, m := range lista.soVideos(func(mensagemDoGrupo) bool { return true }) {
+						g.info[m.id] = m
+					}
+				}
+			}
+			g.album = len(baixados) > 1
+		}
+	}
+	if err := g.guardarProntos(ctx); err != nil {
+		falhar("Não consegui guardar o vídeo: " + err.Error())
+		return
+	}
+	if g.guardados == 0 {
+		a.db.ExecContext(ctx, `UPDATE pedidos_do_telegram SET estado = 'pronto', mensagem = 'A mensagem não tem vídeo.', baixado = 0 WHERE id = ?`, id)
+		return
+	}
+	a.db.ExecContext(ctx, `UPDATE pedidos_do_telegram SET estado = 'pronto', mensagem = '', baixado = ?, videos = ? WHERE id = ?`, g.bytes, g.guardados, id)
+	a.emFundo(func() { a.completarMeusVideos(context.Background()) })
+	texto := "Baixado em Meus vídeos › " + p.Pasta + "."
+	if g.guardados > 1 {
+		texto = fmt.Sprintf("%d vídeos baixados em Meus vídeos › %s.", g.guardados, p.Pasta)
+	}
+	a.avisos.avisar(aviso{Titulo: titulo, Texto: texto, Link: a.cfg.link + "/#/meus-videos"})
+}
+
+func (a *app) depoisDoErro(ctx, c context.Context, id int64, err error, falhar func(string)) {
+	if _, e := a.pedidoDe(ctx, id); e != nil {
+		return // cancelado e apagado
+	}
+	if c.Err() != nil && ctx.Err() == nil {
+		falhar("Cancelado.")
+		return
+	}
+	falhar(err.Error())
+}
+
+// guardaDoPedido leva os vídeos prontos da pasta temporária para Meus vídeos, com o nome certo.
+type guardaDoPedido struct {
+	a         *app
+	p         pedidoDoTelegram
+	link      linkDoTelegram
+	tmp       string
+	info      map[int64]mensagemDoGrupo // o texto e a data de cada mensagem, quando se sabe
+	album     bool                      // vários vídeos com o nome escolhido: "Nome 01", "Nome 02"
+	guardados int
+	bytes     int64
+	ordem     int
+}
+
+// enquanto roda o tdl e, a cada 2 s, mostra o andamento (e, no grupo, guarda o que já terminou).
+func (g *guardaDoPedido) enquanto(ctx context.Context, rodar func() error) error {
+	parar, parou := make(chan struct{}), make(chan struct{})
 	go func() {
+		defer close(parou)
 		t := time.NewTicker(2 * time.Second)
 		defer t.Stop()
 		for {
@@ -498,122 +834,50 @@ func (a *app) baixarDoTelegram(ctx context.Context, id int64) {
 			case <-parar:
 				return
 			case <-t.C:
-				a.db.ExecContext(ctx, `UPDATE pedidos_do_telegram SET baixado = ? WHERE id = ?`, tamanhoDaPasta(tmp), id)
+				if g.p.Tudo {
+					g.guardarProntos(ctx)
+				}
+				g.a.db.ExecContext(ctx, `UPDATE pedidos_do_telegram SET baixado = ?, videos = ? WHERE id = ?`, g.bytes+tamanhoDaPasta(g.tmp), g.guardados, g.p.ID)
 			}
 		}
 	}()
-	modelo := "{{ .MessageID }}_{{ filenamify .FileName }}"
-	if p.Tudo {
-		lista := filepath.Join(tmp, ".lista.json")
-		err = a.rodarTdl(c, "chat", "export", "-c", link.chat, "-o", lista)
-		if err == nil {
-			a.tirarOsJaBaixados(ctx, lista, link)
-			err = a.rodarTdl(c, "dl", "-f", lista, "-d", tmp, "--restart", "--template", modelo)
-		}
-	} else {
-		err = a.rodarTdl(c, "dl", "-u", link.limpo, "-d", tmp, "--group", "--restart", "--template", modelo)
-	}
+	err := rodar()
 	close(parar)
-	if err != nil {
-		if _, e := a.pedidoDe(ctx, id); e != nil {
-			return // cancelado e apagado
-		}
-		if c.Err() != nil && ctx.Err() == nil {
-			falhar("Cancelado.")
-			return
-		}
-		falhar(err.Error())
-		return
-	}
+	<-parou
+	return err
+}
 
-	baixados := videosBaixados(tmp)
-	if len(baixados) == 0 {
-		msg := "A mensagem não tem vídeo."
-		if p.Tudo {
-			msg = "Nenhum vídeo novo no grupo."
-		}
-		a.db.ExecContext(ctx, `UPDATE pedidos_do_telegram SET estado = 'pronto', mensagem = ?, baixado = 0 WHERE id = ?`, msg, id)
-		return
-	}
-	var total int64
-	for i, b := range baixados {
-		nome := p.Nome
+func (g *guardaDoPedido) guardarProntos(ctx context.Context) error {
+	baixados := videosBaixados(g.tmp)
+	for _, b := range baixados {
+		m, sabe := g.info[b.mensagem]
+		nome := g.p.Nome
 		switch {
-		case nome == "":
-			nome = primeiro(limparNome(strings.TrimSuffix(b.nome, filepath.Ext(b.nome))), fmt.Sprintf("Vídeo %d", b.mensagem))
-		case len(baixados) > 1:
-			nome = fmt.Sprintf("%s %02d", nome, i+1)
+		case g.p.Tudo || nome == "":
+			if !sabe {
+				m = mensagemDoGrupo{arquivo: b.nome}
+			}
+			nome = nomeDoVideo(m.texto, primeiro(m.arquivo, b.nome), m.data)
+		case g.album:
+			g.ordem++
+			nome = fmt.Sprintf("%s %02d", nome, g.ordem)
 		}
-		origem := link.limpo
+		origem := g.link.limpo
 		if b.mensagem > 0 {
-			origem = linkDaMensagem(link, b.mensagem)
+			origem = linkDaMensagem(g.link, b.mensagem)
 		}
-		v, err := a.guardarNaPasta(ctx, b.caminho, p.Pasta, nome, origem)
+		criadoEm := ""
+		if m.data > 0 {
+			criadoEm = time.Unix(m.data, 0).UTC().Format(time.RFC3339)
+		}
+		v, err := g.a.guardarNaPasta(ctx, b.caminho, g.p.Pasta, nome, origem, criadoEm, b.mensagem)
 		if err != nil {
-			falhar("Não consegui guardar o vídeo: " + err.Error())
-			return
+			return err
 		}
-		total += v.Tamanho
+		g.guardados++
+		g.bytes += v.Tamanho
 	}
-	a.db.ExecContext(ctx, `UPDATE pedidos_do_telegram SET estado = 'pronto', mensagem = '', baixado = ?, videos = ? WHERE id = ?`, total, len(baixados), id)
-	a.emFundo(func() { a.completarMeusVideos(context.Background()) })
-	texto := "Baixado em Meus vídeos › " + p.Pasta + "."
-	if len(baixados) > 1 {
-		texto = fmt.Sprintf("%d vídeos baixados em Meus vídeos › %s.", len(baixados), p.Pasta)
-	}
-	a.avisos.avisar(aviso{Titulo: primeiro(p.Nome, p.Pasta), Texto: texto, Link: a.cfg.link + "/#/meus-videos"})
-}
-
-func linkDaMensagem(l linkDoTelegram, mensagem int64) string {
-	if _, err := strconv.ParseInt(l.chat, 10, 64); err == nil {
-		return fmt.Sprintf("https://t.me/c/%s/%d", l.chat, mensagem)
-	}
-	return fmt.Sprintf("https://t.me/%s/%d", l.chat, mensagem)
-}
-
-// tirarOsJaBaixados: "todos os vídeos do grupo" de novo só baixa o que ainda não veio. A lista
-// do tdl é {"id": ..., "messages": [{"id": 4, ...}]}; se o formato mudar, baixa tudo.
-func (a *app) tirarOsJaBaixados(ctx context.Context, lista string, l linkDoTelegram) {
-	dados, err := os.ReadFile(lista)
-	if err != nil {
-		return
-	}
-	var doc map[string]json.RawMessage
-	if json.Unmarshal(dados, &doc) != nil {
-		return
-	}
-	var mensagens []map[string]any
-	if json.Unmarshal(doc["messages"], &mensagens) != nil {
-		return
-	}
-	rows, err := a.db.QueryContext(ctx, `SELECT origem FROM meus_videos WHERE origem != ''`)
-	if err != nil {
-		return
-	}
-	ja := map[string]bool{}
-	for rows.Next() {
-		var o string
-		if rows.Scan(&o) == nil {
-			ja[o] = true
-		}
-	}
-	rows.Close()
-	ficam := mensagens[:0]
-	for _, m := range mensagens {
-		id, _ := m["id"].(float64)
-		if id > 0 && ja[linkDaMensagem(l, int64(id))] {
-			continue
-		}
-		ficam = append(ficam, m)
-	}
-	b, err := json.Marshal(ficam)
-	if err != nil {
-		return
-	}
-	doc["messages"] = b
-	if novo, err := json.Marshal(doc); err == nil {
-		os.WriteFile(lista, novo, 0o644)
-	}
+	return nil
 }
 
 type baixadoDoTelegram struct {
@@ -624,12 +888,13 @@ type baixadoDoTelegram struct {
 
 var reArquivoDoTdl = regexp.MustCompile(`^(\d+)_(.*)$`)
 
-// videosBaixados: os vídeos da pasta, na ordem das mensagens. Fotos e outros arquivos ficam de fora.
+// videosBaixados: os vídeos prontos da pasta, na ordem das mensagens. O tdl grava em ".tmp" e só
+// renomeia no fim; fotos e outros arquivos ficam de fora.
 func videosBaixados(dir string) []baixadoDoTelegram {
 	entradas, _ := os.ReadDir(dir)
 	lista := []baixadoDoTelegram{}
 	for _, e := range entradas {
-		if e.IsDir() || strings.HasPrefix(e.Name(), ".") || !ehVideo(e.Name()) || strings.HasSuffix(e.Name(), ".tmp") {
+		if e.IsDir() || strings.HasPrefix(e.Name(), ".") || !ehVideo(e.Name()) {
 			continue
 		}
 		b := baixadoDoTelegram{caminho: filepath.Join(dir, e.Name()), nome: e.Name()}
@@ -709,10 +974,9 @@ func (a *app) handlePedirAoTelegram(w http.ResponseWriter, r *http.Request) {
 		erroJSON(w, http.StatusBadRequest, "Escolha uma pasta.")
 		return
 	}
-	nome := limparNome(corpo.Nome)
-	if nome == "" && !corpo.Tudo {
-		erroJSON(w, http.StatusBadRequest, "Dê um nome ao vídeo.")
-		return
+	nome := limparNome(corpo.Nome) // vazio: o nome sai da mensagem (nomeDoVideo)
+	if corpo.Tudo {
+		nome = "" // no grupo, cada vídeo ganha o seu
 	}
 	res, err := a.db.ExecContext(r.Context(), `INSERT INTO pedidos_do_telegram (link, nome, pasta, tudo, criado_em) VALUES (?, ?, ?, ?, ?)`,
 		l.limpo, nome, pasta, corpo.Tudo, a.carimbo())
@@ -724,6 +988,39 @@ func (a *app) handlePedirAoTelegram(w http.ResponseWriter, r *http.Request) {
 	a.acordarTelegram()
 	p, _ := a.pedidoDe(r.Context(), id)
 	writeJSON(w, http.StatusAccepted, p)
+}
+
+// handleRastrear: os vídeos do grupo do link, com o nome de cada um, antes de baixar.
+func (a *app) handleRastrear(w http.ResponseWriter, r *http.Request) {
+	var corpo struct {
+		Link string `json:"link"`
+	}
+	if !lerCorpo(w, r, &corpo) {
+		return
+	}
+	l, ok := lerLinkDoTelegram(corpo.Link)
+	if !ok {
+		erroJSON(w, http.StatusBadRequest, "Isso não parece um link do Telegram (https://t.me/…).")
+		return
+	}
+	if !tdlDisponivel() {
+		erroJSON(w, http.StatusServiceUnavailable, "O tdl não está instalado no servidor.")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute)
+	defer cancel()
+	grupo, videos, err := a.rastrearGrupo(ctx, l)
+	if err != nil {
+		erroJSON(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	novos := 0
+	for _, v := range videos {
+		if !v.Ja {
+			novos++
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"grupo": grupo, "pasta": primeiro(grupo, l.chat), "link": l.limpo, "videos": videos, "novos": novos})
 }
 
 // handleApagarPedido: cancela (se está baixando) e tira da lista.

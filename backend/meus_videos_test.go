@@ -154,7 +154,7 @@ func TestAlbumDoTelegramNumeraOsVideos(t *testing.T) {
 		nomes = append(nomes, v.Nome)
 	}
 	// O segundo pedido não apaga o primeiro: os nomes repetidos ganham " 2".
-	if got := strings.Join(nomes, ","); got != "Reunião 01,Reunião 02,Reunião 01 2,Reunião 02 2" {
+	if got := strings.Join(nomes, ","); got != "Reunião 01,Reunião 01 2,Reunião 02,Reunião 02 2" { // pela data e pelo número da mensagem
 		t.Fatal(got)
 	}
 }
@@ -179,7 +179,6 @@ func TestPedidoDoTelegramConfereOsCampos(t *testing.T) {
 	for _, c := range []map[string]any{
 		{"link": "https://exemplo.com/x", "nome": "a", "pasta": "b"},
 		{"link": "https://t.me/c/1234567890", "nome": "a", "pasta": "b"}, // grupo sem "tudo"
-		{"link": "https://t.me/c/1234567890/4", "nome": "", "pasta": "b"},
 		{"link": "https://t.me/c/1234567890/4", "nome": "a", "pasta": "  "},
 	} {
 		if status, texto := e.pedir(t, "POST", "/api/meus-videos/telegram", c); status != 400 {
@@ -188,37 +187,102 @@ func TestPedidoDoTelegramConfereOsCampos(t *testing.T) {
 	}
 }
 
-func TestTodosOsVideosDoGrupoPulaOsJaBaixados(t *testing.T) {
+func TestNomeDoVideo(t *testing.T) {
+	casos := []struct {
+		texto, arquivo string
+		data           int64
+		esperado       string
+	}{
+		{"#F54 Aula 31 - Ponto final\n\n08. Pontuação", "Aula 31 - Ponto final.mp4", 0, "Aula 31 - Ponto final"},
+		{"", "Aula 2 - Adjetivos.mp4", 0, "Aula 2 - Adjetivos"},
+		{"", "VID_20260101_090000.mp4", 1767268800, "Vídeo de 01-01-2026 às 09h00"},
+		{"", "5012345678.mp4", 1767268800, "Vídeo de 01-01-2026 às 09h00"},
+		{"  \n Pôr do sol em Itacaré ", "VID_1.mp4", 0, "Pôr do sol em Itacaré"},
+		{"a/b: c?", "", 0, "a b c"},
+		{"", "", 0, "Vídeo"},
+	}
+	for _, c := range casos {
+		if got := nomeDoVideo(c.texto, c.arquivo, c.data); got != c.esperado {
+			t.Errorf("%q %q: %q", c.texto, c.arquivo, got)
+		}
+	}
+	longo := nomeDoVideo(strings.Repeat("palavra ", 30), "", 0)
+	if len([]rune(longo)) > 81 || !strings.HasSuffix(longo, "…") {
+		t.Errorf("longo: %q", longo)
+	}
+}
+
+func TestRastrearOGrupo(t *testing.T) {
+	e := novoAmbiente(t)
+	comTdlFalso(t)
+	e.a.db.Exec(`INSERT INTO meus_videos (pasta, nome, arquivo, origem, criado_em) VALUES ('Aulas', 'a', 'Aulas/a.mp4', 'https://t.me/c/1234567890/4', '2026-01-01T00:00:00Z')`)
+	status, texto := e.pedir(t, "POST", "/api/meus-videos/telegram/rastrear", map[string]string{"link": "https://t.me/c/1234567890/40?single"})
+	if status != 200 {
+		t.Fatalf("%d %s", status, texto)
+	}
+	var r struct {
+		Grupo, Pasta string
+		Novos        int
+		Videos       []videoDoGrupo
+	}
+	json.Unmarshal([]byte(texto), &r)
+	var nomes []string
+	for _, v := range r.Videos {
+		nomes = append(nomes, fmt.Sprintf("%d:%s:%v", v.Mensagem, v.Nome, v.Ja))
+	}
+	// Do mais antigo ao mais novo; o .rar fica de fora; a 4 já foi baixada.
+	if r.Grupo != "Grupo Inventado 2026" || r.Pasta != "Grupo Inventado 2026" || r.Novos != 2 ||
+		strings.Join(nomes, "|") != "4:Aula 1 - Começo:true|5:Vídeo de 01-01-2026 às 09h00:false|40:Praia do Forte:false" {
+		t.Fatalf("%+v %v", r, nomes)
+	}
+}
+
+func TestTodosOsVideosDoGrupoComOsNomesDasMensagens(t *testing.T) {
 	e := novoAmbiente(t)
 	args := comTdlFalso(t)
-	ctx := context.Background()
-	// A mensagem 4 já veio antes.
-	e.a.db.Exec(`INSERT INTO meus_videos (pasta, nome, arquivo, origem, criado_em) VALUES ('Viagens', 'a', 'Viagens/a.mp4', 'https://t.me/c/1234567890/4', '2026-01-01T00:00:00Z')`)
-	lista := filepath.Join(t.TempDir(), "lista.json")
-	os.WriteFile(lista, []byte(`{"id":1234567890,"messages":[{"id":4,"file":"a.mp4"},{"id":5,"file":"b.mp4"}]}`), 0o644)
-	l, _ := lerLinkDoTelegram("https://t.me/c/1234567890")
-	e.a.tirarOsJaBaixados(ctx, lista, l)
-	b, _ := os.ReadFile(lista)
-	if strings.Contains(string(b), `"id":4`) || !strings.Contains(string(b), `"id":5`) {
-		t.Fatal(string(b))
-	}
+	// A mensagem 4 já veio antes (o arquivo existe: sem ele, a sincronização tiraria o registro).
+	os.MkdirAll(filepath.Join(e.a.pastaDosMeusVideos(), "Aulas"), 0o755)
+	os.WriteFile(filepath.Join(e.a.pastaDosMeusVideos(), "Aulas", "a.mp4"), []byte("video"), 0o644)
+	e.a.db.Exec(`INSERT INTO meus_videos (pasta, nome, arquivo, origem, criado_em) VALUES ('Aulas', 'a', 'Aulas/a.mp4', 'https://t.me/c/1234567890/4', '2026-01-01T00:00:00Z')`)
 
-	p := pedirEBaixar(t, e, map[string]any{"link": "https://t.me/c/1234567890", "pasta": "Viagens", "tudo": true})
-	if p.Estado != "pronto" || p.Videos != 1 {
+	p := pedirEBaixar(t, e, map[string]any{"link": "https://t.me/c/1234567890/40", "nome": "ignorado", "pasta": "Grupo Inventado", "tudo": true})
+	if p.Estado != "pronto" || p.Videos != 2 || p.Total != 2 {
 		t.Fatalf("%+v", p)
 	}
 	usados, _ := os.ReadFile(args)
-	if !strings.Contains(string(usados), "export\n-c\n1234567890") || !strings.Contains(string(usados), "-f\n") {
+	if !strings.Contains(string(usados), "export\n-c\n1234567890\n--with-content") || !strings.Contains(string(usados), "-f\n") {
 		t.Fatalf("argumentos:\n%s", usados)
 	}
-	// Sem nome: fica o nome do arquivo no Telegram.
 	var r respostaDosMeusVideos
 	e.json(t, "/api/meus-videos", &r)
-	achou := false
+	var nomes []string
 	for _, v := range r.Videos {
-		achou = achou || v.Nome == "VID_2026_0"
+		if v.Pasta == "Grupo Inventado" {
+			nomes = append(nomes, v.Nome+" "+v.CriadoEm)
+		}
 	}
-	if !achou {
+	// Na ordem das mensagens, com a data delas; a 4 e o .rar não vieram de novo.
+	if got := strings.Join(nomes, "|"); got != "Vídeo de 01-01-2026 às 09h00 2026-01-01T12:00:00Z|Praia do Forte 2026-01-02T12:00:00Z" {
+		t.Fatal(got)
+	}
+
+	// De novo: nada novo.
+	p = pedirEBaixar(t, e, map[string]any{"link": "https://t.me/c/1234567890", "pasta": "Grupo Inventado", "tudo": true})
+	if p.Estado != "pronto" || p.Mensagem != "Nenhum vídeo novo no grupo." {
+		t.Fatalf("%+v", p)
+	}
+}
+
+func TestVideoSemNomeUsaOTextoDaMensagem(t *testing.T) {
+	e := novoAmbiente(t)
+	comTdlFalso(t)
+	p := pedirEBaixar(t, e, map[string]any{"link": "https://t.me/c/1234567890/40", "pasta": "Viagens"})
+	if p.Estado != "pronto" {
+		t.Fatalf("%+v", p)
+	}
+	var r respostaDosMeusVideos
+	e.json(t, "/api/meus-videos", &r)
+	if len(r.Videos) != 1 || r.Videos[0].Nome != "Praia do Forte" {
 		t.Fatalf("%+v", r.Videos)
 	}
 }

@@ -23,6 +23,9 @@ const adicionando = ref(!!props.link)
 const form = ref({ link: linkDoTelegram(props.link), nome: '', pasta: props.pasta, tudo: false })
 const enviando = ref(false)
 const erroDoForm = ref('')
+const rastreio = ref(null) // { grupo, pasta, videos, novos } do link de agora
+const rastreando = ref(false)
+const verTodos = ref(false)
 const aberto = ref(null) // vídeo com a folha aberta
 const editando = ref(null) // { nome, pasta } na folha
 
@@ -69,13 +72,44 @@ async function colar() {
   }
 }
 
+// Outro link: o rastreio de antes não vale mais.
+watch(
+  () => form.value.link,
+  () => {
+    rastreio.value = null
+    verTodos.value = false
+  },
+)
+
+const listaDoRastreio = computed(() => {
+  const v = rastreio.value?.videos || []
+  return verTodos.value ? v : v.slice(0, 8)
+})
+
+// Rastrear: o servidor lê o grupo do link e mostra os vídeos com o nome que cada um vai ganhar.
+async function rastrear() {
+  erroDoForm.value = ''
+  rastreando.value = true
+  try {
+    const r = await api('/api/meus-videos/telegram/rastrear', { metodo: 'POST', corpo: { link: linkDoTelegram(form.value.link) }, tempo: 200000 })
+    rastreio.value = r
+    if (!form.value.pasta.trim()) form.value.pasta = r.pasta
+  } catch (e) {
+    erroDoForm.value = e.message
+  } finally {
+    rastreando.value = false
+  }
+}
+
 async function pedir() {
   erroDoForm.value = ''
+  if (form.value.tudo && !rastreio.value) return rastrear()
   enviando.value = true
   try {
     await api('/api/meus-videos/telegram', { metodo: 'POST', corpo: { ...form.value, link: linkDoTelegram(form.value.link) } })
     recado('Na fila: o servidor baixa e avisa quando terminar.')
     form.value = { link: '', nome: '', pasta: form.value.pasta, tudo: false }
+    rastreio.value = null
     adicionando.value = false
     await carregar()
   } catch (e) {
@@ -160,26 +194,55 @@ onBeforeUnmount(() => clearInterval(relogioDaFila))
           <input v-model="form.link" class="campo" type="url" inputmode="url" placeholder="https://t.me/c/…/4" autocomplete="off" required />
           <button type="button" class="botao" @click="colar">Colar</button>
         </span>
-        <small class="suave">No Telegram: segure a mensagem do vídeo › Copiar link.</small>
+        <small class="suave">No Telegram: segure a mensagem de um vídeo › Copiar link.</small>
       </label>
-      <label>
-        <span>{{ form.tudo ? 'Nome (opcional: sem ele, fica o nome do arquivo)' : 'Nome do vídeo' }}</span>
-        <input v-model="form.nome" class="campo" type="text" placeholder="Praia do Forte, dia 2" :required="!form.tudo" />
-      </label>
-      <label>
+      <div class="modos" role="radiogroup" aria-label="O que baixar">
+        <button type="button" role="radio" class="pilula" :class="{ ativa: !form.tudo }" :aria-checked="!form.tudo" @click="form.tudo = false">Só este vídeo</button>
+        <button type="button" role="radio" class="pilula" :class="{ ativa: form.tudo }" :aria-checked="form.tudo" @click="form.tudo = true">O grupo todo</button>
+      </div>
+
+      <template v-if="!form.tudo">
+        <label>
+          <span>Nome do vídeo <small class="suave">(opcional)</small></span>
+          <input v-model="form.nome" class="campo" type="text" placeholder="Vazio: o texto da mensagem ou o nome do arquivo" />
+        </label>
+      </template>
+      <template v-else-if="rastreio">
+        <div class="rastreio">
+          <p class="resumo">
+            <strong>{{ rastreio.grupo || 'Grupo' }}</strong>:
+            {{ rastreio.videos.length }} {{ rastreio.videos.length === 1 ? 'vídeo' : 'vídeos' }}<template v-if="rastreio.videos.length - rastreio.novos">, {{ rastreio.videos.length - rastreio.novos }} já baixados</template>.
+          </p>
+          <ol class="nomes">
+            <li v-for="v in listaDoRastreio" :key="v.mensagem" :class="{ ja: v.ja }">
+              {{ v.nome }}<span v-if="v.ja" class="chip">já baixado</span>
+            </li>
+          </ol>
+          <button v-if="rastreio.videos.length > 8" type="button" class="botao" @click="verTodos = !verTodos">
+            {{ verTodos ? 'Mostrar menos' : `Ver todos os ${rastreio.videos.length}` }}
+          </button>
+        </div>
+      </template>
+      <p v-else class="suave explicacao">
+        Rastrear lê o grupo e mostra os vídeos com o nome de cada um (do texto da mensagem ou do arquivo), antes de baixar.
+      </p>
+
+      <label v-if="!form.tudo || rastreio">
         <span>Pasta</span>
         <input v-model="form.pasta" class="campo" type="text" list="pastas-existentes" placeholder="Viagens, Trabalho…" required />
         <datalist id="pastas-existentes">
           <option v-for="p in pastas" :key="p" :value="p" />
         </datalist>
       </label>
-      <label class="opcao">
-        <input v-model="form.tudo" type="checkbox" />
-        Todos os vídeos do grupo (só os que ainda não vieram)
-      </label>
       <div v-if="erroDoForm" class="aviso erro">{{ erroDoForm }}</div>
       <div class="linha-acoes">
-        <button class="botao principal" type="submit" :disabled="enviando">{{ enviando ? 'Mandando…' : 'Baixar' }}</button>
+        <button v-if="form.tudo && !rastreio" class="botao principal" type="submit" :disabled="rastreando">
+          {{ rastreando ? 'Rastreando…' : 'Rastrear o grupo' }}
+        </button>
+        <button v-else-if="form.tudo" class="botao principal" type="submit" :disabled="enviando || !rastreio.novos">
+          {{ enviando ? 'Mandando…' : rastreio.novos ? `Baixar ${rastreio.novos === 1 ? 'o vídeo novo' : `os ${rastreio.novos} vídeos novos`}` : 'Nada novo para baixar' }}
+        </button>
+        <button v-else class="botao principal" type="submit" :disabled="enviando">{{ enviando ? 'Mandando…' : 'Baixar' }}</button>
         <button class="botao" type="button" @click="adicionando = false">Cancelar</button>
       </div>
     </form>
@@ -190,12 +253,13 @@ onBeforeUnmount(() => clearInterval(relogioDaFila))
         <li v-for="p in pedidos" :key="p.id">
           <div class="pedido">
             <div class="texto">
-              <span class="nome-do-pedido">{{ p.nome || (p.tudo ? 'Todos os vídeos do grupo' : 'Vídeo') }}</span>
+              <span class="nome-do-pedido">{{ p.nome || (p.tudo ? `Grupo › ${p.pasta}` : 'Vídeo') }}</span>
               <span class="meta">
                 <span class="chip" :class="{ erro: p.estado === 'erro', andando: p.estado === 'baixando' }">{{ ESTADOS[p.estado] || p.estado }}</span>
                 {{ p.pasta }}
+                <template v-if="p.estado === 'baixando' && p.total"> · {{ p.videos }} de {{ p.total }}</template>
                 <template v-if="p.baixado"> · {{ tamanho(p.baixado) }}</template>
-                <template v-if="p.estado === 'pronto' && p.videos > 1"> · {{ p.videos }} vídeos</template>
+                <template v-if="p.estado !== 'baixando' && p.videos > 1"> · {{ p.videos }} vídeos</template>
               </span>
               <span v-if="p.mensagem" class="mensagem" :class="{ erro: p.estado === 'erro' }">{{ p.mensagem }}</span>
             </div>
@@ -300,6 +364,52 @@ onBeforeUnmount(() => clearInterval(relogioDaFila))
 
 .edicao {
   margin-top: 16px;
+}
+
+.modos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: -4px 0 -2px;
+}
+
+.explicacao {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.rastreio {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+}
+
+.resumo {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.nomes {
+  width: 100%;
+  margin: 0;
+  padding-left: 22px;
+  font-size: 0.86rem;
+  line-height: 1.6;
+}
+
+.nomes li {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nomes .ja {
+  color: var(--texto-fraco);
+}
+
+.nomes .chip {
+  margin-left: 6px;
 }
 
 .mais {

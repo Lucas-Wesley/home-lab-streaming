@@ -31,7 +31,7 @@ func novoAmbiente(t *testing.T) *ambiente {
 	t.Setenv("WHISPER_URL", "")
 	t.Setenv("PARAKEET_URL", "")
 	t.Setenv("FLASHCARDS_URL", "")
-	t.Setenv("ACERVO_URL", "") // nada de Acervo de verdade
+	t.Setenv("ACERVO_URL", "")                                 // nada de Acervo de verdade
 	t.Setenv("TDL_BIN", filepath.Join(t.TempDir(), "sem-tdl")) // nada de Telegram de verdade
 	t.Setenv("PROCURADOR_DE_TELAS", "")
 	t.Setenv("AGENDA_URL", "http://127.0.0.1:1/") // nada de ge, ESPN ou FotMob de verdade

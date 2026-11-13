@@ -1,29 +1,55 @@
 #!/bin/sh
-# tdl falso dos testes: guarda os argumentos (um por linha) em $TDL_FALSO_ARGS e faz o que o tdl
-# faria na pasta (-d) ou na lista (-o). $TDL_FALSO_ERRO: falha com esse texto. $TDL_FALSO_VIDEOS:
-# quantos vídeos a mensagem tem (padrão 1); sempre vem uma foto junto, que deve ficar de fora.
+# tdl falso dos testes (dados inventados): guarda os argumentos (um por linha) em $TDL_FALSO_ARGS e
+# faz o que o tdl faria. $TDL_FALSO_ERRO: falha com esse texto. $TDL_FALSO_VIDEOS: quantos vídeos
+# a mensagem do "dl -u" tem (padrão 1); sempre vem uma foto junto, que deve ficar de fora.
 printf '%s\n' "$@" >> "$TDL_FALSO_ARGS"
 if [ -n "$TDL_FALSO_ERRO" ]; then
   echo "Error: $TDL_FALSO_ERRO" >&2
   exit 1
 fi
-dir="" ; saida="" ; cmd=""
+dir="" ; saida="" ; lista="" ; url="" ; cmd="" ; faixa=""
 while [ $# -gt 0 ]; do
   case "$1" in
     -d) dir="$2"; shift ;;
     -o) saida="$2"; shift ;;
-    dl|export) cmd="$1" ;;
+    -f) lista="$2"; shift ;;
+    -u) url="$2"; shift ;;
+    -i) faixa="$2"; shift ;;
+    dl|export|ls) cmd="$1" ;;
   esac
   shift
 done
-if [ "$cmd" = "export" ]; then
-  printf '{"id":123,"messages":[{"id":4,"type":"message","file":"a.mp4"},{"id":5,"type":"message","file":"b.mp4"}]}' > "$saida"
-  exit 0
-fi
-n="${TDL_FALSO_VIDEOS:-1}"
-i=0
-while [ "$i" -lt "$n" ]; do
-  printf 'video %s' "$i" > "$dir/$((40 + i))_VID_2026_$i.mp4"
-  i=$((i + 1))
-done
-printf 'foto' > "$dir/40_IMG.jpg"
+case "$cmd" in
+  ls)
+    # chat ls -o json
+    printf '[{"id":1234567890,"type":"channel","visible_name":"Grupo_Inventado_2026"}]'
+    ;;
+  export)
+    de=0 ; ate=999999
+    if [ -n "$faixa" ]; then de="${faixa%,*}"; ate="${faixa#*,}"; fi
+    msgs=""
+    add() { if [ "$1" -ge "$de" ] && [ "$1" -le "$ate" ]; then msgs="$msgs${msgs:+,}$2"; fi; }
+    add 40 '{"id":40,"type":"message","file":"VID_2026_0.mp4","date":1767355200,"text":"Praia do Forte\nque dia!"}'
+    add 6 '{"id":6,"type":"message","file":"apostila.rar","date":1767268800}'
+    add 5 '{"id":5,"type":"message","file":"VID_20260101_090000.mp4","date":1767268800}'
+    add 4 '{"id":4,"type":"message","file":"Aula 1.mp4","date":1767268800,"text":"#F1 Aula 1 - Começo\n\nMódulo 1"}'
+    printf '{"id":1234567890,"messages":[%s]}' "$msgs" > "$saida"
+    ;;
+  dl)
+    if [ -n "$lista" ]; then
+      # Um vídeo por mensagem da lista (o primeiro "id" é o do grupo); um pela metade fica em .tmp.
+      for id in $(grep -o '"id":[0-9]*' "$lista" | tail -n +2 | cut -d: -f2); do
+        printf 'video %s' "$id" > "$dir/${id}_v$id.mp4"
+      done
+      printf 'meio' > "$dir/99_parcial.mp4.tmp"
+      exit 0
+    fi
+    n="${TDL_FALSO_VIDEOS:-1}"
+    i=0
+    while [ "$i" -lt "$n" ]; do
+      printf 'video %s' "$i" > "$dir/$((40 + i))_VID_2026_$i.mp4"
+      i=$((i + 1))
+    done
+    printf 'foto' > "$dir/40_IMG.jpg"
+    ;;
+esac

@@ -1,10 +1,10 @@
 <script setup>
-import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Assistir from './Assistir.vue'
 import Folha from './Folha.vue'
 import Icone from './Icone.vue'
 import { api } from './api.js'
-import { linkDoTelegram } from './meusVideos.js'
+import { chaveDoSalvo, linkDoTelegram } from './meusVideos.js'
 import { tamanho } from './tamanho.js'
 import { duracao, relogio } from './tempo.js'
 
@@ -26,6 +26,8 @@ const erroDoForm = ref('')
 const rastreio = ref(null) // { grupo, pasta, videos, novos, livre } do link de agora
 const rastreando = ref(false)
 const escolhidos = ref(new Set()) // mensagens marcadas na lista do rastreio
+const salvando = ref(false)
+const formulario = ref(null)
 const aberto = ref(null) // vídeo com a folha aberta
 const editando = ref(null) // { nome, pasta } na folha
 
@@ -46,6 +48,85 @@ const andando = computed(() => pedidos.value.some((p) => p.estado === 'na fila' 
 
 // Os prontos ficam na lista por um dia, para se ver o que chegou.
 const recente = (p) => Date.now() - Date.parse(p.criado_em) < 24 * 3600 * 1000
+
+// Salvos: grupos e vídeos guardados para baixar depois, sem caçar o link no Telegram de novo.
+const salvos = computed(() => dados.value?.salvos || [])
+const salvoAtual = computed(() => {
+  const chave = chaveDoSalvo(form.value.link, form.value.tudo)
+  return (chave && salvos.value.find((s) => s.link === chave && s.tudo === form.value.tudo)) || null
+})
+const podeSalvar = computed(() => (form.value.tudo ? !!rastreio.value : !!chaveDoSalvo(form.value.link, false)))
+
+function resumoDoSalvo(s) {
+  const baixados = s.videos.filter((v) => v.ja)
+  if (!s.tudo) {
+    const v = s.videos[0] || {}
+    return ['Vídeo', duracao(v.duracao), tamanho(v.tamanho), v.ja ? 'já baixado' : ''].filter(Boolean).join(' · ')
+  }
+  const partes = [`Grupo · ${quantos(s.videos.length)}`]
+  if (s.videos.length && baixados.length === s.videos.length) partes.push('todos baixados')
+  else {
+    if (baixados.length) partes.push(`${baixados.length} ${baixados.length === 1 ? 'baixado' : 'baixados'}`)
+    const falta = s.videos.filter((v) => !v.ja).reduce((soma, v) => soma + (v.tamanho || 0), 0)
+    if (falta) partes.push(`${baixados.length ? 'faltam' : ''} ${tamanho(falta)}`.trim())
+  }
+  return partes.join(' · ')
+}
+
+const dataCurta = (iso) =>
+  new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).replace(',', ' às')
+
+async function salvar({ calado = false } = {}) {
+  salvando.value = true
+  try {
+    const link = linkDoTelegram(form.value.link)
+    const corpo = form.value.tudo
+      ? { link, tudo: true, titulo: rastreio.value.grupo, pasta: form.value.pasta, videos: rastreio.value.videos }
+      : { link, tudo: false, nome: form.value.nome, pasta: form.value.pasta }
+    const s = await api('/api/meus-videos/salvos', { metodo: 'POST', corpo, tempo: 90000 })
+    if (rastreio.value && form.value.tudo) rastreio.value = { ...rastreio.value, salvo: s.id, de: s.atualizado_em }
+    await carregar()
+    if (!calado) recado('Salvo: fica em Salvos, nesta página, para baixar quando quiser.')
+  } catch (e) {
+    if (calado) throw e
+    erroDoForm.value = e.message
+  } finally {
+    salvando.value = false
+  }
+}
+
+async function tirarSalvo(s) {
+  if (!confirm(`Tirar "${s.titulo}" dos Salvos? Os vídeos já baixados ficam.`)) return
+  try {
+    await api(`/api/meus-videos/salvos/${s.id}`, { metodo: 'DELETE' })
+    await carregar()
+  } catch (e) {
+    recado(e.message, true)
+  }
+}
+
+// Abre o salvo no formulário com a lista guardada: nada de Telegram até "Buscar de novo".
+async function abrirSalvo(s) {
+  erroDoForm.value = ''
+  adicionando.value = true
+  form.value = { link: s.link, nome: s.nome || '', pasta: s.pasta || form.value.pasta, tudo: s.tudo }
+  await nextTick() // o watch do link limpa o rastreio antes
+  if (s.tudo) {
+    rastreio.value = {
+      grupo: s.titulo,
+      pasta: s.pasta,
+      link: s.link,
+      videos: s.videos,
+      novos: s.videos.filter((v) => !v.ja).length,
+      livre: dados.value?.livre || 0,
+      salvo: s.id,
+      de: s.atualizado_em,
+    }
+    escolhidos.value = new Set() // voltou para baixar alguns: marca quem quiser
+  }
+  await nextTick()
+  formulario.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
 
 const ESTADOS = { 'na fila': 'na fila', baixando: 'baixando', pronto: 'pronto', erro: 'erro' }
 
@@ -106,9 +187,10 @@ async function rastrear() {
   rastreando.value = true
   try {
     const r = await api('/api/meus-videos/telegram/rastrear', { metodo: 'POST', corpo: { link: linkDoTelegram(form.value.link) }, tempo: 200000 })
-    rastreio.value = r
+    rastreio.value = r.salvo ? { ...r, de: new Date().toISOString() } : r
     escolhidos.value = new Set(r.videos.filter((v) => !v.ja).map((v) => v.mensagem))
     if (!form.value.pasta.trim()) form.value.pasta = r.pasta
+    if (r.salvo) await carregar() // a lista salva virou esta
   } catch (e) {
     erroDoForm.value = e.message
   } finally {
@@ -126,8 +208,11 @@ async function pedir() {
       if (!escolhidosDaLista.value.length) throw new Error('Marque ao menos um vídeo.')
       corpo.mensagens = escolhidosDaLista.value.map((v) => v.mensagem)
     }
+    // Baixou só alguns do grupo: o grupo vai para os Salvos, para pegar o resto depois.
+    const sobra = form.value.tudo && !salvoAtual.value && escolhidosDaLista.value.length < disponiveis.value.length
+    if (sobra) await salvar({ calado: true })
     await api('/api/meus-videos/telegram', { metodo: 'POST', corpo })
-    recado('Na fila: o servidor baixa e avisa quando terminar.')
+    recado(sobra ? 'Na fila. O grupo ficou em Salvos para baixar o resto depois.' : 'Na fila: o servidor baixa e avisa quando terminar.')
     form.value = { link: '', nome: '', pasta: form.value.pasta, tudo: false }
     rastreio.value = null
     adicionando.value = false
@@ -207,7 +292,7 @@ onBeforeUnmount(() => clearInterval(relogioDaFila))
     <div v-if="erro" class="aviso erro">{{ erro }}</div>
     <div v-if="dados && !dados.telegram.instalado" class="aviso erro">O tdl não está instalado no servidor: dá para ver os vídeos, mas não baixar novos.</div>
 
-    <form v-if="adicionando" class="cartao formulario" @submit.prevent="pedir">
+    <form v-if="adicionando" ref="formulario" class="cartao formulario" @submit.prevent="pedir">
       <label>
         <span>Link da mensagem</span>
         <span class="com-botao">
@@ -222,6 +307,13 @@ onBeforeUnmount(() => clearInterval(relogioDaFila))
       </div>
 
       <template v-if="!form.tudo">
+        <p v-if="salvoAtual" class="video-salvo">
+          <Icone nome="salvo-cheio" />
+          <span class="sobre">
+            <span class="nome-do-video">{{ salvoAtual.titulo }}</span>
+            <span class="peso">{{ resumoDoSalvo(salvoAtual) }} · salvo em {{ dataCurta(salvoAtual.criado_em) }}</span>
+          </span>
+        </p>
         <label>
           <span>Nome do vídeo <small class="suave">(opcional)</small></span>
           <input v-model="form.nome" class="campo" type="text" placeholder="Vazio: o texto da mensagem ou o nome do arquivo" />
@@ -233,7 +325,11 @@ onBeforeUnmount(() => clearInterval(relogioDaFila))
             <p class="resumo">
               <strong>{{ rastreio.grupo || 'Grupo' }}</strong>
               <span class="suave">
-                {{ quantos(rastreio.videos.length) }}<template v-if="rastreio.videos.length - rastreio.novos"> · {{ rastreio.videos.length - rastreio.novos }} já baixados</template>
+                {{ quantos(rastreio.videos.length) }}<template v-if="rastreio.videos.length - rastreio.novos"> · {{ rastreio.videos.length - rastreio.novos }} já {{ rastreio.videos.length - rastreio.novos === 1 ? 'baixado' : 'baixados' }}</template>
+              </span>
+              <span v-if="rastreio.de" class="suave de-quando">
+                Lista de {{ dataCurta(rastreio.de) }} ·
+                <button type="button" class="link" :disabled="rastreando" @click="rastrear">{{ rastreando ? 'buscando…' : 'buscar de novo' }}</button>
               </span>
             </p>
             <button v-if="disponiveis.length" type="button" class="pilula" @click="marcarTodos">
@@ -282,7 +378,18 @@ onBeforeUnmount(() => clearInterval(relogioDaFila))
           {{ enviando ? 'Mandando…' : !rastreio.novos ? 'Nada novo para baixar' : escolhidosDaLista.length ? `Baixar ${quantos(escolhidosDaLista.length)}` : 'Marque os vídeos' }}
         </button>
         <button v-else class="botao principal" type="submit" :disabled="enviando">{{ enviando ? 'Mandando…' : 'Baixar' }}</button>
-        <button class="botao" type="button" @click="adicionando = false">Cancelar</button>
+        <button
+          v-if="podeSalvar"
+          type="button"
+          class="botao"
+          :class="{ salvo: salvoAtual }"
+          :aria-pressed="!!salvoAtual"
+          :disabled="salvando"
+          @click="salvoAtual ? tirarSalvo(salvoAtual) : salvar()"
+        >
+          <Icone :nome="salvoAtual ? 'salvo-cheio' : 'salvo'" />{{ salvando ? 'Salvando…' : salvoAtual ? 'Salvo' : 'Salvar para depois' }}
+        </button>
+        <button class="botao" type="button" @click="adicionando = false">Fechar</button>
       </div>
     </form>
 
@@ -304,6 +411,26 @@ onBeforeUnmount(() => clearInterval(relogioDaFila))
             </div>
             <button v-if="p.estado === 'erro'" class="botao" @click="retomar(p)">Tentar de novo</button>
             <button class="botao icone" :aria-label="p.estado === 'baixando' ? 'Cancelar' : 'Tirar da lista'" @click="tirarPedido(p)"><Icone nome="fechar" /></button>
+          </div>
+        </li>
+      </ul>
+    </section>
+
+    <section v-if="salvos.length">
+      <p class="rotulo">Salvos <span class="quantos">{{ salvos.length }}</span></p>
+      <ul class="lista salvos">
+        <li v-for="s in salvos" :key="s.id">
+          <div class="pedido">
+            <button class="abrir-salvo" @click="abrirSalvo(s)">
+              <span class="icone-do-salvo"><Icone :nome="s.tudo ? 'pasta' : 'tocar'" /></span>
+              <span class="texto">
+                <span class="nome-do-pedido">{{ s.titulo }}</span>
+                <span class="meta">{{ resumoDoSalvo(s) }}</span>
+                <span class="meta fraco">{{ s.pasta && s.pasta !== s.titulo ? `pasta ${s.pasta} · ` : '' }}lista de {{ dataCurta(s.atualizado_em) }}</span>
+              </span>
+              <Icone nome="avancar" class="seta" />
+            </button>
+            <button class="botao icone" aria-label="Tirar dos Salvos" @click="tirarSalvo(s)"><Icone nome="fechar" /></button>
           </div>
         </li>
       </ul>
@@ -537,6 +664,86 @@ onBeforeUnmount(() => clearInterval(relogioDaFila))
 
 .mais {
   margin-top: 14px;
+}
+
+.de-quando {
+  font-size: 0.8rem;
+}
+
+.link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--marca);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.botao.salvo {
+  color: var(--marca);
+}
+
+.video-salvo {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--linha);
+  border-radius: var(--raio-p);
+  color: var(--marca);
+}
+
+.video-salvo .sobre {
+  color: var(--texto);
+}
+
+.abrir-salvo {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.abrir-salvo .texto {
+  display: grid;
+  flex: 1;
+  gap: 3px;
+  min-width: 0;
+}
+
+.abrir-salvo:hover .nome-do-pedido {
+  color: var(--marca);
+}
+
+.icone-do-salvo {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--raio-p);
+  background: var(--superficie);
+  color: var(--marca);
+}
+
+.seta {
+  flex-shrink: 0;
+  color: var(--texto-fraco);
+}
+
+.meta.fraco {
+  color: var(--texto-fraco);
 }
 
 .detalhes {

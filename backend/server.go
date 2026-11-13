@@ -85,6 +85,8 @@ func newServer(a *app, web fs.FS, version string) http.Handler {
 	mux.HandleFunc("POST /api/meus-videos/telegram/rastrear", a.handleRastrear)
 	mux.HandleFunc("DELETE /api/meus-videos/telegram/{id}", a.handleApagarPedido)
 	mux.HandleFunc("POST /api/meus-videos/telegram/{id}/retomar", a.handleRetomarPedido)
+	mux.HandleFunc("POST /api/meus-videos/salvos", a.handleSalvar)
+	mux.HandleFunc("DELETE /api/meus-videos/salvos/{id}", a.handleApagarSalvo)
 	mux.HandleFunc("PATCH /api/meus-videos/{id}", a.handleMudarMeuVideo)
 	mux.HandleFunc("DELETE /api/meus-videos/{id}", a.handleApagarMeuVideo)
 	mux.HandleFunc("GET /api/meus-videos/{id}/capa", a.handleCapaDoMeuVideo)

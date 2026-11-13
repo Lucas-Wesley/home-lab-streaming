@@ -51,6 +51,8 @@ test('rastreia o grupo, mostra o peso de cada vídeo e baixa só os marcados', a
   await itens.first().locator('input').uncheck()
   await expect(page.locator('.total')).toContainText('2 vídeos · 350 MB')
   await page.getByRole('button', { name: 'Baixar 2 vídeos' }).click()
+  // Baixou só parte do grupo: ele vai para os Salvos sozinho.
+  await expect(page.getByText('O grupo ficou em Salvos')).toBeVisible()
 
   await expect(page.locator('.rotulo', { hasText: 'Grupo Inventado 2026' })).toBeVisible({ timeout: 15000 })
   await expect(page.locator('.cartaz')).toHaveText(['Vídeo de 01-01-2026 às 09h00', 'Praia do Forte'])
@@ -63,6 +65,43 @@ test('rastreia o grupo, mostra o peso de cada vídeo e baixa só os marcados', a
   await expect(itens.locator('.peso')).toHaveText(['tamanho desconhecido', 'já baixado', 'já baixado'])
   await expect(itens.nth(1).locator('input')).toBeDisabled()
   await expect(page.getByRole('button', { name: 'Baixar 1 vídeo' })).toBeVisible()
+})
+
+test('salvos: reabre o grupo sem o link e guarda um vídeo para depois', async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 760 })
+  await page.goto('/#/meus-videos')
+  // O grupo do teste anterior ficou salvo: dois baixados, a aula não.
+  const salvos = page.locator('.salvos li')
+  await expect(salvos).toHaveCount(1)
+  await expect(salvos.first()).toContainText('Grupo Inventado 2026')
+  await expect(salvos.first()).toContainText('Grupo · 3 vídeos · 2 baixados')
+
+  // Abre com a lista guardada, sem nada marcado.
+  await salvos.first().getByRole('button', { name: /Grupo Inventado 2026/ }).click()
+  await expect(page.locator('.resumo')).toContainText('Lista de')
+  const itens = page.locator('.opcao-de-video')
+  await expect(itens.locator('.peso')).toHaveText(['tamanho desconhecido', 'já baixado', 'já baixado'])
+  await expect(itens.first().locator('input')).not.toBeChecked()
+  await expect(page.getByRole('button', { name: 'Marque os vídeos' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Salvo', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+
+  // Buscar de novo lê o grupo outra vez (e marca o que é novo).
+  await page.getByRole('button', { name: 'buscar de novo' }).click()
+  await expect(page.getByRole('button', { name: 'Baixar 1 vídeo' })).toBeVisible()
+
+  // Um vídeo só: o servidor olha a mensagem e guarda com o nome e o peso.
+  await page.getByRole('radio', { name: 'Só este vídeo' }).click()
+  await page.getByPlaceholder('https://t.me/c/…/4').fill('https://t.me/c/1234567890/4')
+  await page.getByRole('button', { name: 'Salvar para depois' }).click()
+  await expect(page.locator('.video-salvo')).toContainText('Aula 1 - Começo')
+  await page.getByRole('button', { name: 'Fechar' }).click()
+  await expect(salvos.locator('.nome-do-pedido')).toHaveText(['Aula 1 - Começo', 'Grupo Inventado 2026'])
+
+  page.on('dialog', (d) => d.accept())
+  await salvos.first().getByRole('button', { name: 'Tirar dos Salvos' }).click()
+  await salvos.first().getByRole('button', { name: 'Tirar dos Salvos' }).click()
+  await expect(salvos).toHaveCount(0)
 })
 
 test('no celular, a barra tem Início, Favoritos, Canais e Outros', async ({ page }) => {

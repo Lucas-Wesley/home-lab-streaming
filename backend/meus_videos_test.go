@@ -350,3 +350,64 @@ func TestMeusVideosRenomearMoverApagarEPastaNoDisco(t *testing.T) {
 		t.Fatalf("%+v", r.Videos)
 	}
 }
+
+// Salvos: o grupo fica com a lista do rastreio; o vídeo, com o nome e o peso da mensagem. O "já
+// baixado" é de agora, e rastrear de novo atualiza a lista salva.
+func TestSalvarGrupoEVideo(t *testing.T) {
+	e := novoAmbiente(t)
+	comTdlFalso(t)
+
+	grupo := map[string]any{"link": "https://t.me/c/1234567890/5", "tudo": true, "titulo": "Grupo Inventado 2026", "pasta": "Viagens",
+		"videos": []map[string]any{{"mensagem": 5, "nome": "Vídeo 5", "tamanho": 52428800}, {"mensagem": 40, "nome": "Praia do Forte", "tamanho": 314572800}}}
+	status, texto := e.pedir(t, "POST", "/api/meus-videos/salvos", grupo)
+	if status != 200 {
+		t.Fatalf("salvar grupo: %d %s", status, texto)
+	}
+	var s salvoDoTelegram
+	json.Unmarshal([]byte(texto), &s)
+	if s.Link != "https://t.me/c/1234567890" || !s.Tudo || len(s.Videos) != 2 || s.Pasta != "Viagens" {
+		t.Fatalf("salvo: %+v", s)
+	}
+
+	status, texto = e.pedir(t, "POST", "/api/meus-videos/salvos", map[string]any{"link": "https://t.me/c/1234567890/40?single", "pasta": "Viagens"})
+	if status != 200 {
+		t.Fatalf("salvar vídeo: %d %s", status, texto)
+	}
+	var v salvoDoTelegram
+	json.Unmarshal([]byte(texto), &v)
+	if v.Link != "https://t.me/c/1234567890/40" || v.Tudo || v.Titulo != "Praia do Forte" || len(v.Videos) != 1 || v.Videos[0].Tamanho != 314572800 {
+		t.Fatalf("vídeo salvo: %+v", v)
+	}
+
+	// Baixa a 40: nos dois salvos ela passa a "já baixado".
+	pedirEBaixar(t, e, map[string]any{"link": "https://t.me/c/1234567890/5", "tudo": true, "pasta": "Viagens", "mensagens": []int64{40}})
+	var r struct {
+		Salvos []salvoDoTelegram `json:"salvos"`
+		Livre  int64             `json:"livre"`
+	}
+	e.json(t, "/api/meus-videos", &r)
+	if len(r.Salvos) != 2 || r.Livre <= 0 {
+		t.Fatalf("salvos: %+v", r)
+	}
+	if !r.Salvos[0].Videos[0].Ja || r.Salvos[1].Videos[0].Ja || !r.Salvos[1].Videos[1].Ja {
+		t.Fatalf("já baixados: %+v", r.Salvos)
+	}
+
+	// Rastrear o grupo de novo atualiza a lista salva (agora com a aula 4).
+	status, texto = e.pedir(t, "POST", "/api/meus-videos/telegram/rastrear", map[string]string{"link": "https://t.me/c/1234567890/40"})
+	if status != 200 || !strings.Contains(texto, fmt.Sprintf(`"salvo":%d`, s.ID)) {
+		t.Fatalf("rastrear: %d %s", status, texto)
+	}
+	e.json(t, "/api/meus-videos", &r)
+	if g := r.Salvos[1]; len(g.Videos) != 3 || g.Videos[0].Nome != "Aula 1 - Começo" {
+		t.Fatalf("lista atualizada: %+v", g)
+	}
+
+	if status, _ := e.pedir(t, "DELETE", fmt.Sprintf("/api/meus-videos/salvos/%d", s.ID), nil); status != 204 {
+		t.Fatal("apagar:", status)
+	}
+	e.json(t, "/api/meus-videos", &r)
+	if len(r.Salvos) != 1 {
+		t.Fatalf("depois de apagar: %+v", r.Salvos)
+	}
+}

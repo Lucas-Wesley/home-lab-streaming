@@ -93,6 +93,8 @@ defineProps({ nome: { type: String, required: true } })
       <rect x="4.5" y="4.5" width="6" height="6" rx="1.5" /><rect x="13.5" y="4.5" width="6" height="6" rx="1.5" />
       <rect x="4.5" y="13.5" width="6" height="6" rx="1.5" /><rect x="13.5" y="13.5" width="6" height="6" rx="1.5" />
     </template>
+    <path v-else-if="nome === 'salvo'" d="M7 4.5h10a1 1 0 011 1v14l-6-4-6 4v-14a1 1 0 011-1z" />
+    <path v-else-if="nome === 'salvo-cheio'" d="M7 4.5h10a1 1 0 011 1v14l-6-4-6 4v-14a1 1 0 011-1z" fill="currentColor" />
     <path v-else-if="nome === 'pasta'" d="M3.5 7a2 2 0 012-2h4l2 2.5h7a2 2 0 012 2V17a2 2 0 01-2 2h-13a2 2 0 01-2-2z" />
     <path v-else-if="nome === 'atualizar'" d="M19.5 12a7.5 7.5 0 11-2.2-5.3M19.5 4.5v4h-4" />
   </svg>

@@ -52,6 +52,18 @@ CREATE TABLE IF NOT EXISTS pedidos_do_telegram (
 	mensagens TEXT NOT NULL DEFAULT '', -- no grupo, as mensagens escolhidas ("4,5,40"); vazio: todas
 	previsto  INTEGER NOT NULL DEFAULT 0 -- bytes que o Telegram diz que vêm
 );
+-- Salvos: um grupo ou um vídeo do Telegram guardado para baixar depois, sem caçar o link de novo.
+CREATE TABLE IF NOT EXISTS telegram_salvos (
+	id            INTEGER PRIMARY KEY,
+	link          TEXT NOT NULL UNIQUE, -- do grupo (https://t.me/c/123) ou da mensagem
+	tudo          INTEGER NOT NULL DEFAULT 0,
+	titulo        TEXT NOT NULL DEFAULT '', -- o nome do grupo ou do vídeo
+	nome          TEXT NOT NULL DEFAULT '', -- no vídeo, o nome escolhido pelo Lucas
+	pasta         TEXT NOT NULL DEFAULT '',
+	videos        TEXT NOT NULL DEFAULT '[]', -- a lista do último rastreio ([]videoDoGrupo)
+	atualizado_em TEXT NOT NULL, -- quando a lista foi lida do Telegram
+	criado_em     TEXT NOT NULL
+);
 `
 
 type meuVideo struct {
@@ -981,9 +993,16 @@ func (a *app) handleMeusVideos(w http.ResponseWriter, r *http.Request) {
 		falha(w, err)
 		return
 	}
+	salvos, err := a.salvosDoTelegram(r.Context())
+	if err != nil {
+		falha(w, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"videos":   videos,
 		"pedidos":  pedidos,
+		"salvos":   salvos,
+		"livre":    espacoLivre(a.pastaDosMeusVideos()),
 		"telegram": map[string]bool{"instalado": tdlDisponivel()},
 	})
 }
@@ -1066,8 +1085,15 @@ func (a *app) handleRastrear(w http.ResponseWriter, r *http.Request) {
 			novos++
 		}
 	}
+	// Se o grupo está nos Salvos, a lista de lá passa a ser esta.
+	var salvo int64
+	if a.db.QueryRowContext(r.Context(), `SELECT id FROM telegram_salvos WHERE link = ?`, linkDoGrupo(l)).Scan(&salvo) == nil {
+		b, _ := json.Marshal(videos)
+		a.db.ExecContext(r.Context(), `UPDATE telegram_salvos SET videos = ?, titulo = COALESCE(NULLIF(?, ''), titulo), atualizado_em = ? WHERE id = ?`,
+			string(b), grupo, a.carimbo(), salvo)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"grupo": grupo, "pasta": primeiro(grupo, l.chat), "link": l.limpo, "videos": videos, "novos": novos,
-		"livre": espacoLivre(a.pastaDosMeusVideos())})
+		"livre": espacoLivre(a.pastaDosMeusVideos()), "salvo": salvo})
 }
 
 // handleApagarPedido: cancela (se está baixando) e tira da lista.
@@ -1101,6 +1127,160 @@ func (a *app) handleRetomarPedido(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, p)
+}
+
+// ---------- Salvos ----------
+
+type salvoDoTelegram struct {
+	ID           int64          `json:"id"`
+	Link         string         `json:"link"`
+	Tudo         bool           `json:"tudo"`
+	Titulo       string         `json:"titulo"`
+	Nome         string         `json:"nome,omitempty"`
+	Pasta        string         `json:"pasta"`
+	Videos       []videoDoGrupo `json:"videos"`
+	AtualizadoEm string         `json:"atualizado_em"`
+	CriadoEm     string         `json:"criado_em"`
+}
+
+// linkDoGrupo: o link só do grupo, que identifica o grupo nos Salvos.
+func linkDoGrupo(l linkDoTelegram) string {
+	return strings.TrimSuffix(linkDaMensagem(l, 0), "/0")
+}
+
+// salvosDoTelegram: os salvos, do mais novo ao mais antigo, com o "já baixado" de agora.
+func (a *app) salvosDoTelegram(ctx context.Context) ([]salvoDoTelegram, error) {
+	rows, err := a.db.QueryContext(ctx, `SELECT id, link, tudo, titulo, nome, pasta, videos, atualizado_em, criado_em FROM telegram_salvos ORDER BY id DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	lista := []salvoDoTelegram{}
+	for rows.Next() {
+		var s salvoDoTelegram
+		var videos string
+		if err := rows.Scan(&s.ID, &s.Link, &s.Tudo, &s.Titulo, &s.Nome, &s.Pasta, &videos, &s.AtualizadoEm, &s.CriadoEm); err != nil {
+			return nil, err
+		}
+		json.Unmarshal([]byte(videos), &s.Videos)
+		if s.Videos == nil {
+			s.Videos = []videoDoGrupo{}
+		}
+		lista = append(lista, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	for i := range lista {
+		if l, ok := lerLinkDoTelegram(lista[i].Link); ok {
+			ja := a.jaBaixadas(ctx, l)
+			for j := range lista[i].Videos {
+				lista[i].Videos[j].Ja = ja[lista[i].Videos[j].Mensagem]
+			}
+		}
+	}
+	return lista, nil
+}
+
+// olharMensagem: o vídeo de uma mensagem (nome, peso, duração), sem baixar.
+func (a *app) olharMensagem(ctx context.Context, l linkDoTelegram) (videoDoGrupo, error) {
+	sessao, liberar, err := a.sessaoParaRastrear()
+	if err != nil {
+		return videoDoGrupo{}, err
+	}
+	defer liberar()
+	dir, err := os.MkdirTemp("", "mensagem-")
+	if err != nil {
+		return videoDoGrupo{}, err
+	}
+	defer os.RemoveAll(dir)
+	lista, err := a.exportarGrupo(ctx, sessao, l.chat, l.mensagem, l.mensagem, filepath.Join(dir, "lista.json"))
+	if err != nil {
+		return videoDoGrupo{}, err
+	}
+	for _, m := range lista.soVideos(func(m mensagemDoGrupo) bool { return m.id == l.mensagem }) {
+		v := videoDoGrupo{Mensagem: m.id, Nome: nomeDoVideo(m.texto, m.arquivo, m.data), Tamanho: m.tamanho, Duracao: m.duracao}
+		if m.data > 0 {
+			v.Data = time.Unix(m.data, 0).UTC().Format(time.RFC3339)
+		}
+		return v, nil
+	}
+	return videoDoGrupo{}, errors.New("A mensagem não tem vídeo.")
+}
+
+// handleSalvar guarda um grupo (com a lista do rastreio, que a página manda) ou um vídeo (o
+// servidor olha a mensagem para saber o nome e o peso). O mesmo link de novo atualiza o salvo.
+func (a *app) handleSalvar(w http.ResponseWriter, r *http.Request) {
+	var corpo struct {
+		Link   string         `json:"link"`
+		Tudo   bool           `json:"tudo"`
+		Titulo string         `json:"titulo"`
+		Nome   string         `json:"nome"`
+		Pasta  string         `json:"pasta"`
+		Videos []videoDoGrupo `json:"videos"`
+	}
+	if !lerCorpo(w, r, &corpo) {
+		return
+	}
+	l, ok := lerLinkDoTelegram(corpo.Link)
+	if !ok {
+		erroJSON(w, http.StatusBadRequest, "Isso não parece um link do Telegram (https://t.me/…).")
+		return
+	}
+	link, titulo, nome, videos := linkDoGrupo(l), limparNome(corpo.Titulo), "", corpo.Videos
+	if !corpo.Tudo {
+		if l.mensagem == 0 {
+			erroJSON(w, http.StatusBadRequest, "O link é do grupo, não de uma mensagem.")
+			return
+		}
+		link, nome = linkDaMensagem(l, l.mensagem), limparNome(corpo.Nome)
+		videos = []videoDoGrupo{{Mensagem: l.mensagem}}
+		if tdlDisponivel() {
+			ctx, cancel := context.WithTimeout(r.Context(), time.Minute)
+			v, err := a.olharMensagem(ctx, l)
+			cancel()
+			if err != nil {
+				erroJSON(w, http.StatusBadGateway, err.Error())
+				return
+			}
+			videos[0] = v
+		}
+		titulo = primeiro(nome, videos[0].Nome, "Vídeo")
+	}
+	if videos == nil {
+		videos = []videoDoGrupo{}
+	}
+	b, _ := json.Marshal(videos)
+	agora := a.carimbo()
+	if _, err := a.db.ExecContext(r.Context(), `INSERT INTO telegram_salvos (link, tudo, titulo, nome, pasta, videos, atualizado_em, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT (link) DO UPDATE SET titulo = excluded.titulo, nome = excluded.nome, pasta = excluded.pasta, videos = excluded.videos, atualizado_em = excluded.atualizado_em`,
+		link, corpo.Tudo, primeiro(titulo, l.chat), nome, limparNome(corpo.Pasta), string(b), agora, agora); err != nil {
+		falha(w, err)
+		return
+	}
+	salvos, err := a.salvosDoTelegram(r.Context())
+	if err != nil {
+		falha(w, err)
+		return
+	}
+	for _, s := range salvos {
+		if s.Link == link {
+			writeJSON(w, http.StatusOK, s)
+			return
+		}
+	}
+	falha(w, errors.New("o salvo sumiu"))
+}
+
+func (a *app) handleApagarSalvo(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		erroJSON(w, http.StatusBadRequest, "Salvo inválido.")
+		return
+	}
+	a.db.ExecContext(r.Context(), `DELETE FROM telegram_salvos WHERE id = ?`, id)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (a *app) meuVideoDoCaminho(w http.ResponseWriter, r *http.Request) (meuVideo, bool) {

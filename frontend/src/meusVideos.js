@@ -12,3 +12,14 @@ export function linkCompartilhado(busca) {
   const q = new URLSearchParams(busca)
   return linkDoTelegram([q.get('url'), q.get('text'), q.get('title')].filter(Boolean).join(' '))
 }
+
+// O link que identifica o salvo: só o do grupo (https://t.me/c/123) ou o da mensagem. Igual ao
+// servidor (linkDoGrupo e linkDaMensagem). Vazio quando não dá.
+export function chaveDoSalvo(link, tudo) {
+  const m = linkDoTelegram(link).match(/^https?:\/\/(?:t|telegram)\.me\/(c\/\d+|[A-Za-z][A-Za-z0-9_]{3,})((?:\/\d+){0,2})\/?(?:\?.*)?$/)
+  if (!m) return ''
+  const base = `https://t.me/${m[1]}`
+  if (tudo) return base
+  const mensagem = m[2].split('/').filter(Boolean).at(-1)
+  return mensagem ? `${base}/${mensagem}` : ''
+}

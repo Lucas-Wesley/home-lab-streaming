@@ -21,10 +21,11 @@ const situacao = ref(null)
 const erro = ref('')
 const escolhido = ref(null) // item de "Continuar assistindo" com a folha aberta
 
+// Canais por último: quem busca quase sempre quer um filme ou uma série.
 const GRUPOS = [
-  { tipo: 'canal', nome: 'Canais' },
   { tipo: 'filme', nome: 'Filmes' },
   { tipo: 'serie', nome: 'Séries' },
+  { tipo: 'canal', nome: 'Canais' },
 ]
 
 const nadaAchado = computed(() => resultado.value && GRUPOS.every((g) => !resultado.value[g.tipo].length))
@@ -105,7 +106,7 @@ onMounted(async () => {
     <h1>Início</h1>
     <label class="busca">
       <Icone nome="pesquisar" />
-      <input v-model="texto" class="campo" type="search" placeholder="Buscar canais, filmes e séries" aria-label="Buscar" autocomplete="off" enterkeyhint="search" />
+      <input v-model="texto" class="campo" type="search" placeholder="Buscar filmes, séries e canais" aria-label="Buscar" autocomplete="off" enterkeyhint="search" />
     </label>
 
     <div v-if="erro" class="aviso erro">{{ erro }}</div>

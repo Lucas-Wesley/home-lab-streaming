@@ -35,14 +35,14 @@ const pastas = computed(() => {
   const nomes = new Set((dados.value?.videos || []).map((v) => v.pasta))
   return [...nomes].sort((a, b) => a.localeCompare(b, 'pt-BR'))
 })
-const grupos = computed(() => {
-  const r = []
-  for (const p of pastas.value) {
-    if (props.pasta && p !== props.pasta) continue
-    r.push({ pasta: p, videos: dados.value.videos.filter((v) => v.pasta === p) })
-  }
-  return r
-})
+// Sem pasta na rota, a página mostra só as pastas; os vídeos aparecem ao abrir uma.
+const grupos = computed(() =>
+  pastas.value.map((p) => {
+    const videos = dados.value.videos.filter((v) => v.pasta === p)
+    return { pasta: p, videos, tamanho: videos.reduce((soma, v) => soma + (v.tamanho || 0), 0) }
+  }),
+)
+const daPasta = computed(() => (props.pasta ? (dados.value?.videos || []).filter((v) => v.pasta === props.pasta) : []))
 const pedidos = computed(() => (dados.value?.pedidos || []).filter((p) => p.estado !== 'pronto' || recente(p)))
 const andando = computed(() => pedidos.value.some((p) => p.estado === 'na fila' || p.estado === 'baixando'))
 
@@ -358,9 +358,6 @@ onBeforeUnmount(() => clearInterval(relogioDaFila))
           </p>
         </div>
       </template>
-      <p v-else class="suave explicacao">
-        Rastrear lê o grupo e mostra os vídeos com o nome de cada um (do texto da mensagem ou do arquivo), antes de baixar.
-      </p>
 
       <label v-if="!form.tudo || rastreio">
         <span>Pasta</span>
@@ -416,7 +413,7 @@ onBeforeUnmount(() => clearInterval(relogioDaFila))
       </ul>
     </section>
 
-    <section v-if="salvos.length">
+    <section v-if="salvos.length && !pasta">
       <p class="rotulo">Salvos <span class="quantos">{{ salvos.length }}</span></p>
       <ul class="lista salvos">
         <li v-for="s in salvos" :key="s.id">
@@ -436,19 +433,32 @@ onBeforeUnmount(() => clearInterval(relogioDaFila))
       </ul>
     </section>
 
-    <div v-if="pastas.length > 1" class="pastas">
-      <button class="pilula" :class="{ ativa: !pasta }" @click="irParaPasta('')">Todas</button>
-      <button v-for="p in pastas" :key="p" class="pilula" :class="{ ativa: pasta === p }" @click="irParaPasta(p)">{{ p }}</button>
-    </div>
-
     <p v-if="dados && !dados.videos.length && !adicionando" class="vazio">
       Nenhum vídeo ainda. Toque em <strong>Baixar do Telegram</strong> e cole o link de uma mensagem com vídeo.
     </p>
 
-    <section v-for="g in grupos" :key="g.pasta">
-      <p class="rotulo">{{ g.pasta }} <span class="quantos">{{ g.videos.length }}</span></p>
+    <section v-if="!pasta && grupos.length">
+      <p class="rotulo">Pastas <span class="quantos">{{ grupos.length }}</span></p>
+      <ul class="lista pastas">
+        <li v-for="g in grupos" :key="g.pasta">
+          <button class="abrir-salvo pedido" @click="irParaPasta(g.pasta)">
+            <span class="icone-do-salvo"><Icone nome="pasta" /></span>
+            <span class="texto">
+              <span class="nome-do-pedido">{{ g.pasta }}</span>
+              <span class="meta">{{ quantos(g.videos.length) }}{{ g.tamanho ? ` · ${tamanho(g.tamanho)}` : '' }}</span>
+            </span>
+            <Icone nome="avancar" class="seta" />
+          </button>
+        </li>
+      </ul>
+    </section>
+
+    <section v-if="pasta">
+      <button class="voltar-as-pastas" @click="irParaPasta('')"><Icone nome="voltar" /> Pastas</button>
+      <p class="rotulo">{{ pasta }} <span class="quantos">{{ daPasta.length }}</span></p>
+      <p v-if="dados && !daPasta.length" class="vazio">Nenhum vídeo nesta pasta.</p>
       <ul class="grade">
-        <li v-for="v in g.videos" :key="v.id">
+        <li v-for="v in daPasta" :key="v.id">
           <button class="cartaz" @click="abrir(v)">
             <span class="capa" :data-inicial="v.nome.slice(0, 1)">
               <img v-if="v.capa" :src="v.capa" alt="" loading="lazy" @error="semImagem" />
@@ -555,11 +565,6 @@ onBeforeUnmount(() => clearInterval(relogioDaFila))
   margin: -4px 0 -2px;
 }
 
-.explicacao {
-  margin: 0;
-  font-size: 0.85rem;
-  line-height: 1.45;
-}
 
 .rastreio {
   display: grid;
@@ -785,11 +790,26 @@ onBeforeUnmount(() => clearInterval(relogioDaFila))
   color: var(--vermelho);
 }
 
-.pastas {
-  display: flex;
-  flex-wrap: wrap;
+.pastas .abrir-salvo {
+  width: 100%;
+}
+
+.voltar-as-pastas {
+  display: inline-flex;
+  align-items: center;
   gap: 4px;
-  margin-top: 24px;
+  margin: 8px 0 4px;
+  padding: 6px 0;
+  border: 0;
+  background: none;
+  color: var(--texto-suave);
+  font: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.voltar-as-pastas:hover {
+  color: var(--marca);
 }
 
 .quantos {

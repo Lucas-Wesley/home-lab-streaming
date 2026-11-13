@@ -11,10 +11,15 @@ test('baixa do Telegram para a pasta, renomeia e apaga', async ({ page }) => {
   await page.getByPlaceholder('Viagens, Trabalho…').fill('Viagens')
   await page.getByRole('button', { name: 'Baixar', exact: true }).click()
 
-  const cartaz = page.locator('.cartaz', { hasText: 'Praia do Forte' })
-  await expect(cartaz).toBeVisible({ timeout: 15000 })
-  await expect(page.locator('.rotulo', { hasText: 'Viagens' })).toBeVisible()
+  // A página mostra só as pastas; os vídeos aparecem ao abrir uma.
+  const pasta = page.locator('.pastas button', { hasText: 'Viagens' })
+  await expect(pasta).toContainText('1 vídeo', { timeout: 15000 })
+  await expect(page.locator('.cartaz')).toHaveCount(0)
   await expect(page.locator('.chip', { hasText: 'pronto' })).toBeVisible()
+  await pasta.click()
+  await expect(page.locator('.rotulo', { hasText: 'Viagens' })).toBeVisible()
+  const cartaz = page.locator('.cartaz', { hasText: 'Praia do Forte' })
+  await expect(cartaz).toBeVisible()
 
   await cartaz.click()
   await expect(page.getByRole('dialog')).toContainText('Viagens')
@@ -54,8 +59,9 @@ test('rastreia o grupo, mostra o peso de cada vídeo e baixa só os marcados', a
   // Baixou só parte do grupo: ele vai para os Salvos sozinho.
   await expect(page.getByText('O grupo ficou em Salvos')).toBeVisible()
 
-  await expect(page.locator('.rotulo', { hasText: 'Grupo Inventado 2026' })).toBeVisible({ timeout: 15000 })
-  await expect(page.locator('.cartaz')).toHaveText(['Vídeo de 01-01-2026 às 09h00', 'Praia do Forte'])
+  await page.locator('.pastas button', { hasText: 'Grupo Inventado 2026' }).click({ timeout: 15000 })
+  await expect(page.locator('.cartaz')).toHaveText(['Vídeo de 01-01-2026 às 09h00', 'Praia do Forte'], { timeout: 15000 })
+  await page.getByRole('button', { name: 'Pastas' }).click()
 
   // De novo: os que já vieram aparecem, mas não dá para marcar.
   await page.getByRole('button', { name: 'Baixar do Telegram' }).click()

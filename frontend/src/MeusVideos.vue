@@ -23,9 +23,9 @@ const adicionando = ref(!!props.link)
 const form = ref({ link: linkDoTelegram(props.link), nome: '', pasta: props.pasta, tudo: false })
 const enviando = ref(false)
 const erroDoForm = ref('')
-const rastreio = ref(null) // { grupo, pasta, videos, novos } do link de agora
+const rastreio = ref(null) // { grupo, pasta, videos, novos, livre } do link de agora
 const rastreando = ref(false)
-const verTodos = ref(false)
+const escolhidos = ref(new Set()) // mensagens marcadas na lista do rastreio
 const aberto = ref(null) // vídeo com a folha aberta
 const editando = ref(null) // { nome, pasta } na folha
 
@@ -77,14 +77,28 @@ watch(
   () => form.value.link,
   () => {
     rastreio.value = null
-    verTodos.value = false
   },
 )
 
-const listaDoRastreio = computed(() => {
-  const v = rastreio.value?.videos || []
-  return verTodos.value ? v : v.slice(0, 8)
-})
+// Os já baixados não entram na escolha: baixar de novo não faz sentido.
+const disponiveis = computed(() => (rastreio.value?.videos || []).filter((v) => !v.ja))
+const escolhidosDaLista = computed(() => disponiveis.value.filter((v) => escolhidos.value.has(v.mensagem)))
+const pesoEscolhido = computed(() => escolhidosDaLista.value.reduce((soma, v) => soma + (v.tamanho || 0), 0))
+const naoCabe = computed(() => rastreio.value?.livre > 0 && pesoEscolhido.value > rastreio.value.livre)
+const todosMarcados = computed(() => disponiveis.value.length > 0 && escolhidosDaLista.value.length === disponiveis.value.length)
+
+function marcar(v) {
+  if (v.ja) return
+  const novo = new Set(escolhidos.value)
+  novo.has(v.mensagem) ? novo.delete(v.mensagem) : novo.add(v.mensagem)
+  escolhidos.value = novo
+}
+
+function marcarTodos() {
+  escolhidos.value = todosMarcados.value ? new Set() : new Set(disponiveis.value.map((v) => v.mensagem))
+}
+
+const quantos = (n) => `${n} ${n === 1 ? 'vídeo' : 'vídeos'}`
 
 // Rastrear: o servidor lê o grupo do link e mostra os vídeos com o nome que cada um vai ganhar.
 async function rastrear() {
@@ -93,6 +107,7 @@ async function rastrear() {
   try {
     const r = await api('/api/meus-videos/telegram/rastrear', { metodo: 'POST', corpo: { link: linkDoTelegram(form.value.link) }, tempo: 200000 })
     rastreio.value = r
+    escolhidos.value = new Set(r.videos.filter((v) => !v.ja).map((v) => v.mensagem))
     if (!form.value.pasta.trim()) form.value.pasta = r.pasta
   } catch (e) {
     erroDoForm.value = e.message
@@ -106,7 +121,12 @@ async function pedir() {
   if (form.value.tudo && !rastreio.value) return rastrear()
   enviando.value = true
   try {
-    await api('/api/meus-videos/telegram', { metodo: 'POST', corpo: { ...form.value, link: linkDoTelegram(form.value.link) } })
+    const corpo = { ...form.value, link: linkDoTelegram(form.value.link) }
+    if (form.value.tudo) {
+      if (!escolhidosDaLista.value.length) throw new Error('Marque ao menos um vídeo.')
+      corpo.mensagens = escolhidosDaLista.value.map((v) => v.mensagem)
+    }
+    await api('/api/meus-videos/telegram', { metodo: 'POST', corpo })
     recado('Na fila: o servidor baixa e avisa quando terminar.')
     form.value = { link: '', nome: '', pasta: form.value.pasta, tudo: false }
     rastreio.value = null
@@ -209,18 +229,37 @@ onBeforeUnmount(() => clearInterval(relogioDaFila))
       </template>
       <template v-else-if="rastreio">
         <div class="rastreio">
-          <p class="resumo">
-            <strong>{{ rastreio.grupo || 'Grupo' }}</strong>:
-            {{ rastreio.videos.length }} {{ rastreio.videos.length === 1 ? 'vídeo' : 'vídeos' }}<template v-if="rastreio.videos.length - rastreio.novos">, {{ rastreio.videos.length - rastreio.novos }} já baixados</template>.
-          </p>
-          <ol class="nomes">
-            <li v-for="v in listaDoRastreio" :key="v.mensagem" :class="{ ja: v.ja }">
-              {{ v.nome }}<span v-if="v.ja" class="chip">já baixado</span>
+          <div class="cabeca-do-rastreio">
+            <p class="resumo">
+              <strong>{{ rastreio.grupo || 'Grupo' }}</strong>
+              <span class="suave">
+                {{ quantos(rastreio.videos.length) }}<template v-if="rastreio.videos.length - rastreio.novos"> · {{ rastreio.videos.length - rastreio.novos }} já baixados</template>
+              </span>
+            </p>
+            <button v-if="disponiveis.length" type="button" class="pilula" @click="marcarTodos">
+              {{ todosMarcados ? 'Desmarcar todos' : 'Marcar todos' }}
+            </button>
+          </div>
+          <ul class="escolha" aria-label="Vídeos do grupo">
+            <li v-for="v in rastreio.videos" :key="v.mensagem">
+              <label class="opcao-de-video" :class="{ ja: v.ja }">
+                <input type="checkbox" :checked="v.ja || escolhidos.has(v.mensagem)" :disabled="v.ja" @change="marcar(v)" />
+                <span class="sobre">
+                  <span class="nome-do-video">{{ v.nome }}</span>
+                  <span class="peso">
+                    <template v-if="v.ja">já baixado</template>
+                    <template v-else>{{ [duracao(v.duracao), tamanho(v.tamanho)].filter(Boolean).join(' · ') || 'tamanho desconhecido' }}</template>
+                  </span>
+                </span>
+              </label>
             </li>
-          </ol>
-          <button v-if="rastreio.videos.length > 8" type="button" class="botao" @click="verTodos = !verTodos">
-            {{ verTodos ? 'Mostrar menos' : `Ver todos os ${rastreio.videos.length}` }}
-          </button>
+          </ul>
+          <p class="total" :class="{ erro: naoCabe }">
+            <span><strong>{{ quantos(escolhidosDaLista.length) }}</strong><template v-if="pesoEscolhido"> · {{ tamanho(pesoEscolhido) }}</template></span>
+            <span v-if="rastreio.livre > 0" class="livre">
+              {{ naoCabe ? 'Não cabe: ' : '' }}{{ tamanho(rastreio.livre) }} livres no servidor
+            </span>
+          </p>
         </div>
       </template>
       <p v-else class="suave explicacao">
@@ -239,8 +278,8 @@ onBeforeUnmount(() => clearInterval(relogioDaFila))
         <button v-if="form.tudo && !rastreio" class="botao principal" type="submit" :disabled="rastreando">
           {{ rastreando ? 'Rastreando…' : 'Rastrear o grupo' }}
         </button>
-        <button v-else-if="form.tudo" class="botao principal" type="submit" :disabled="enviando || !rastreio.novos">
-          {{ enviando ? 'Mandando…' : rastreio.novos ? `Baixar ${rastreio.novos === 1 ? 'o vídeo novo' : `os ${rastreio.novos} vídeos novos`}` : 'Nada novo para baixar' }}
+        <button v-else-if="form.tudo" class="botao principal" type="submit" :disabled="enviando || !escolhidosDaLista.length || naoCabe">
+          {{ enviando ? 'Mandando…' : !rastreio.novos ? 'Nada novo para baixar' : escolhidosDaLista.length ? `Baixar ${quantos(escolhidosDaLista.length)}` : 'Marque os vídeos' }}
         </button>
         <button v-else class="botao principal" type="submit" :disabled="enviando">{{ enviando ? 'Mandando…' : 'Baixar' }}</button>
         <button class="botao" type="button" @click="adicionando = false">Cancelar</button>
@@ -258,7 +297,7 @@ onBeforeUnmount(() => clearInterval(relogioDaFila))
                 <span class="chip" :class="{ erro: p.estado === 'erro', andando: p.estado === 'baixando' }">{{ ESTADOS[p.estado] || p.estado }}</span>
                 {{ p.pasta }}
                 <template v-if="p.estado === 'baixando' && p.total"> · {{ p.videos }} de {{ p.total }}</template>
-                <template v-if="p.baixado"> · {{ tamanho(p.baixado) }}</template>
+                <template v-if="p.baixado"> · {{ tamanho(p.baixado) }}<template v-if="p.estado === 'baixando' && p.previsto"> de {{ tamanho(p.previsto) }}</template></template>
                 <template v-if="p.estado !== 'baixando' && p.videos > 1"> · {{ p.videos }} vídeos</template>
               </span>
               <span v-if="p.mensagem" class="mensagem" :class="{ erro: p.estado === 'erro' }">{{ p.mensagem }}</span>
@@ -334,8 +373,15 @@ onBeforeUnmount(() => clearInterval(relogioDaFila))
 
 .formulario {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 14px;
   margin-bottom: 8px;
+}
+
+/* Nada passa da largura da tela: os filhos da grade podem encolher. */
+.formulario > *,
+.formulario label > * {
+  min-width: 0;
 }
 
 .formulario label {
@@ -353,6 +399,15 @@ onBeforeUnmount(() => clearInterval(relogioDaFila))
 .com-botao {
   display: flex;
   gap: 8px;
+}
+
+.com-botao .campo {
+  flex: 1;
+  min-width: 0;
+}
+
+.com-botao .botao {
+  flex-shrink: 0;
 }
 
 .opcao {
@@ -381,35 +436,103 @@ onBeforeUnmount(() => clearInterval(relogioDaFila))
 
 .rastreio {
   display: grid;
+  gap: 10px;
+}
+
+.cabeca-do-rastreio {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
   gap: 8px;
-  justify-items: start;
 }
 
 .resumo {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
   margin: 0;
   font-size: 0.9rem;
+  overflow-wrap: anywhere;
 }
 
-.nomes {
-  width: 100%;
+.resumo .suave {
+  font-size: 0.82rem;
+}
+
+.cabeca-do-rastreio .pilula {
+  flex-shrink: 0;
+}
+
+/* A lista rola por dentro: o botão de baixar fica à vista. */
+.escolha {
+  max-height: min(55vh, 520px);
   margin: 0;
-  padding-left: 22px;
-  font-size: 0.86rem;
-  line-height: 1.6;
+  padding: 0;
+  overflow-y: auto;
+  border: 1px solid var(--linha);
+  border-radius: var(--raio-p);
+  list-style: none;
+  overscroll-behavior: contain;
 }
 
-.nomes li {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.escolha li + li {
+  border-top: 1px solid var(--linha);
 }
 
-.nomes .ja {
-  color: var(--texto-fraco);
+.opcao-de-video {
+  display: flex !important;
+  align-items: flex-start;
+  gap: 12px !important;
+  padding: 10px 12px;
+  font-weight: 400 !important;
+  cursor: pointer;
 }
 
-.nomes .chip {
-  margin-left: 6px;
+.opcao-de-video input {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  margin: 1px 0 0;
+  accent-color: var(--marca);
+}
+
+.opcao-de-video.ja {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.sobre {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.nome-do-video {
+  font-size: 0.9rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.peso {
+  color: var(--texto-suave);
+  font-size: 0.78rem;
+}
+
+.total {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  margin: 0;
+  font-size: 0.88rem;
+}
+
+.total .livre {
+  color: var(--texto-suave);
+}
+
+.total.erro .livre {
+  color: var(--vermelho);
+  font-weight: 600;
 }
 
 .mais {
@@ -437,6 +560,7 @@ onBeforeUnmount(() => clearInterval(relogioDaFila))
 
 .nome-do-pedido {
   font-weight: 550;
+  overflow-wrap: anywhere;
 }
 
 .meta {

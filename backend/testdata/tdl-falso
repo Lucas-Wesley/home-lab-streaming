@@ -29,9 +29,9 @@ case "$cmd" in
     if [ -n "$faixa" ]; then de="${faixa%,*}"; ate="${faixa#*,}"; fi
     msgs=""
     add() { if [ "$1" -ge "$de" ] && [ "$1" -le "$ate" ]; then msgs="$msgs${msgs:+,}$2"; fi; }
-    add 40 '{"id":40,"type":"message","file":"VID_2026_0.mp4","date":1767355200,"text":"Praia do Forte\nque dia!"}'
+    add 40 '{"id":40,"type":"message","file":"VID_2026_0.mp4","date":1767355200,"text":"Praia do Forte\nque dia!","raw":{"Media":{"Document":{"Size":314572800,"Attributes":[{"Duration":95,"W":1920},{"FileName":"VID_2026_0.mp4"}]}}}}'
     add 6 '{"id":6,"type":"message","file":"apostila.rar","date":1767268800}'
-    add 5 '{"id":5,"type":"message","file":"VID_20260101_090000.mp4","date":1767268800}'
+    add 5 '{"id":5,"type":"message","file":"VID_20260101_090000.mp4","date":1767268800,"raw":{"Media":{"Document":{"Size":52428800,"Attributes":[{"Duration":12.5}]}}}}'
     add 4 '{"id":4,"type":"message","file":"Aula 1.mp4","date":1767268800,"text":"#F1 Aula 1 - Começo\n\nMódulo 1"}'
     printf '{"id":1234567890,"messages":[%s]}' "$msgs" > "$saida"
     ;;

@@ -11,6 +11,7 @@ import Icone from './Icone.vue'
 import Archive from './Archive.vue'
 import Inicio from './Inicio.vue'
 import MeusVideos from './MeusVideos.vue'
+import Outros from './Outros.vue'
 import Player from './Player.vue'
 import Serie from './Serie.vue'
 import Torrent from './Torrent.vue'
@@ -37,16 +38,18 @@ const rota = computed(() => {
   return { nome: nome || 'inicio', param: resto.join('/'), opcoes: new URLSearchParams(busca) }
 })
 
+// No celular, a barra do pé tem só as três primeiras e "Outros", que abre a lista do resto.
 const MENU = [
-  { rota: 'inicio', nome: 'Início', icone: 'inicio' },
-  { rota: 'favoritos', nome: 'Favoritos', icone: 'favorito' },
-  { rota: 'canais', nome: 'Canais', icone: 'canais' },
-  { rota: 'filmes', nome: 'Filmes', icone: 'filmes' },
-  { rota: 'series', nome: 'Séries', icone: 'series' },
-  { rota: 'torrents', nome: 'Downloads', icone: 'torrents' },
-  { rota: 'meus-videos', nome: 'Meus vídeos', curto: 'Vídeos', icone: 'pasta' },
-  { rota: 'ajustes', nome: 'Ajustes', icone: 'ajustes' },
+  { rota: 'inicio', nome: 'Início', icone: 'inicio', naBarra: true },
+  { rota: 'favoritos', nome: 'Favoritos', icone: 'favorito', naBarra: true },
+  { rota: 'canais', nome: 'Canais', icone: 'canais', naBarra: true },
+  { rota: 'filmes', nome: 'Filmes', icone: 'filmes', descricao: 'Os filmes da assinatura' },
+  { rota: 'series', nome: 'Séries', icone: 'series', descricao: 'As séries da assinatura' },
+  { rota: 'torrents', nome: 'Downloads', icone: 'torrents', descricao: 'Torrents e vídeos guardados no servidor' },
+  { rota: 'meus-videos', nome: 'Meus vídeos', icone: 'pasta', descricao: 'Vídeos do Telegram, em pastas' },
+  { rota: 'ajustes', nome: 'Ajustes', icone: 'ajustes', descricao: 'Assinatura, telas, buscas e avisos' },
 ]
+const OUTROS = MENU.filter((item) => !item.naBarra)
 
 const secao = computed(() => {
   const n = rota.value.nome
@@ -56,6 +59,9 @@ const secao = computed(() => {
   if (n === 'torrent' || n === 'archive') return 'torrents'
   return n
 })
+
+// Na barra do celular, as seções fora dela acendem "Outros".
+const naBarra = computed(() => (MENU.some((item) => item.naBarra && item.rota === secao.value) ? secao.value : 'outros'))
 
 // No player e no controle, a tela é do vídeo: o menu some.
 const telaCheia = computed(() => ['assistir', 'controle'].includes(rota.value.nome))
@@ -112,12 +118,16 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', aoMudarHash))
           v-for="item in MENU"
           :key="item.rota"
           class="item"
-          :class="{ ativo: secao === item.rota }"
+          :class="{ ativo: secao === item.rota, 'na-barra': item.naBarra, 'ativo-na-barra': naBarra === item.rota }"
           :aria-current="secao === item.rota ? 'page' : undefined"
           @click="ir(item.rota)"
         >
           <Icone :nome="item.icone" />
-          <span class="nome" :data-curto="item.curto || item.nome"><span>{{ item.nome }}</span></span>
+          <span class="nome">{{ item.nome }}</span>
+        </button>
+        <button class="item outros na-barra" :class="{ 'ativo-na-barra': naBarra === 'outros' }" @click="ir('outros')">
+          <Icone nome="outros" />
+          <span class="nome">Outros</span>
         </button>
       </nav>
       <div class="rodape">{{ versao ? `versão ${versao.slice(0, 7)}` : 'sem conexão' }}</div>
@@ -154,6 +164,7 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', aoMudarHash))
         :pasta="rota.param"
         :link="rota.opcoes.get('link') || ''"
       />
+      <Outros v-else-if="rota.nome === 'outros'" :itens="OUTROS" />
       <Ajustes v-else-if="rota.nome === 'ajustes'" :tela="telaAnterior" :secao="rota.param" />
       <Inicio v-else :busca="rota.opcoes.get('q') || ''" />
     </main>
@@ -257,6 +268,10 @@ nav {
   font-size: 0.72rem;
 }
 
+.item.outros {
+  display: none;
+}
+
 .conteudo {
   margin-left: 216px;
   min-height: 100vh;
@@ -329,7 +344,15 @@ nav {
   }
 
   nav {
-    grid-template-columns: repeat(8, 1fr);
+    grid-template-columns: repeat(4, 1fr);
+  }
+
+  .item:not(.na-barra) {
+    display: none;
+  }
+
+  .item.outros {
+    display: flex;
   }
 
   .item {
@@ -351,16 +374,18 @@ nav {
   }
 
   .item.ativo {
+    color: var(--texto-suave);
+    font-weight: 500;
+  }
+
+  .item.ativo svg {
+    color: inherit;
+  }
+
+  .item.ativo-na-barra,
+  .item.ativo-na-barra svg {
     color: var(--marca);
-  }
-
-  /* Na barra do celular, o nome curto: oito abas numa linha. */
-  .item .nome > span {
-    display: none;
-  }
-
-  .item .nome::after {
-    content: attr(data-curto);
+    font-weight: 600;
   }
 
   .conteudo {

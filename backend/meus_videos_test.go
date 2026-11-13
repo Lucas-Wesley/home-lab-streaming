@@ -223,6 +223,7 @@ func TestRastrearOGrupo(t *testing.T) {
 	var r struct {
 		Grupo, Pasta string
 		Novos        int
+		Livre        int64
 		Videos       []videoDoGrupo
 	}
 	json.Unmarshal([]byte(texto), &r)
@@ -234,6 +235,26 @@ func TestRastrearOGrupo(t *testing.T) {
 	if r.Grupo != "Grupo Inventado 2026" || r.Pasta != "Grupo Inventado 2026" || r.Novos != 2 ||
 		strings.Join(nomes, "|") != "4:Aula 1 - Começo:true|5:Vídeo de 01-01-2026 às 09h00:false|40:Praia do Forte:false" {
 		t.Fatalf("%+v %v", r, nomes)
+	} // O tamanho e a duração vêm da mensagem (raw), antes de baixar.
+	if r.Videos[1].Tamanho != 52428800 || r.Videos[1].Duracao != 12.5 || r.Videos[2].Tamanho != 314572800 || r.Videos[0].Tamanho != 0 {
+		t.Fatalf("tamanhos: %+v", r.Videos)
+	}
+	if r.Livre <= 0 {
+		t.Fatalf("espaço livre: %d", r.Livre)
+	}
+}
+
+func TestGrupoSoOsVideosEscolhidos(t *testing.T) {
+	e := novoAmbiente(t)
+	comTdlFalso(t)
+	p := pedirEBaixar(t, e, map[string]any{"link": "https://t.me/c/1234567890/40", "pasta": "Escolhidos", "tudo": true, "mensagens": []int{40}})
+	if p.Estado != "pronto" || p.Videos != 1 || p.Total != 1 || p.Previsto != 314572800 {
+		t.Fatalf("%+v", p)
+	}
+	var r respostaDosMeusVideos
+	e.json(t, "/api/meus-videos", &r)
+	if len(r.Videos) != 1 || r.Videos[0].Nome != "Praia do Forte" {
+		t.Fatalf("%+v", r.Videos)
 	}
 }
 
@@ -250,7 +271,7 @@ func TestTodosOsVideosDoGrupoComOsNomesDasMensagens(t *testing.T) {
 		t.Fatalf("%+v", p)
 	}
 	usados, _ := os.ReadFile(args)
-	if !strings.Contains(string(usados), "export\n-c\n1234567890\n--with-content") || !strings.Contains(string(usados), "-f\n") {
+	if !strings.Contains(string(usados), "export\n-c\n1234567890\n--with-content\n--raw") || !strings.Contains(string(usados), "-f\n") {
 		t.Fatalf("argumentos:\n%s", usados)
 	}
 	var r respostaDosMeusVideos

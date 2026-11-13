@@ -29,7 +29,9 @@ test('baixa do Telegram para a pasta, renomeia e apaga', async ({ page }) => {
   await expect(page.locator('.cartaz')).toHaveCount(0)
 })
 
-test('rastreia o grupo e baixa todos, com o nome de cada mensagem', async ({ page }) => {
+test('rastreia o grupo, mostra o peso de cada vídeo e baixa só os marcados', async ({ page }) => {
+  // No celular: nada passa da largura da tela.
+  await page.setViewportSize({ width: 360, height: 760 })
   await page.goto('/#/meus-videos')
   await page.getByRole('button', { name: 'Baixar do Telegram' }).click()
   await page.getByPlaceholder('https://t.me/c/…/4').fill('https://t.me/c/1234567890/5')
@@ -38,11 +40,39 @@ test('rastreia o grupo e baixa todos, com o nome de cada mensagem', async ({ pag
 
   // O nome do grupo vira a pasta; o .rar fica de fora; os nomes saem do texto ou da data.
   await expect(page.locator('.resumo')).toContainText('Grupo Inventado 2026')
-  await expect(page.locator('.nomes li')).toHaveText(['Aula 1 - Começo', 'Vídeo de 01-01-2026 às 09h00', 'Praia do Forte'])
+  const itens = page.locator('.opcao-de-video')
+  await expect(itens.locator('.nome-do-video')).toHaveText(['Aula 1 - Começo', 'Vídeo de 01-01-2026 às 09h00', 'Praia do Forte'])
+  await expect(itens.locator('.peso')).toHaveText(['tamanho desconhecido', '50 MB', '2 min · 300 MB'])
   await expect(page.getByPlaceholder('Viagens, Trabalho…')).toHaveValue('Grupo Inventado 2026')
-  await page.getByRole('button', { name: 'Baixar os 3 vídeos novos' }).click()
+  await expect(page.locator('.total')).toContainText('3 vídeos · 350 MB')
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+
+  // Tira a aula da escolha: o total muda.
+  await itens.first().locator('input').uncheck()
+  await expect(page.locator('.total')).toContainText('2 vídeos · 350 MB')
+  await page.getByRole('button', { name: 'Baixar 2 vídeos' }).click()
 
   await expect(page.locator('.rotulo', { hasText: 'Grupo Inventado 2026' })).toBeVisible({ timeout: 15000 })
-  // Na ordem das mensagens (a 4 e a 5 têm a mesma data).
-  await expect(page.locator('.cartaz')).toHaveText(['Aula 1 - Começo', 'Vídeo de 01-01-2026 às 09h00', 'Praia do Forte'])
+  await expect(page.locator('.cartaz')).toHaveText(['Vídeo de 01-01-2026 às 09h00', 'Praia do Forte'])
+
+  // De novo: os que já vieram aparecem, mas não dá para marcar.
+  await page.getByRole('button', { name: 'Baixar do Telegram' }).click()
+  await page.getByPlaceholder('https://t.me/c/…/4').fill('https://t.me/c/1234567890/5')
+  await page.getByRole('radio', { name: 'O grupo todo' }).click()
+  await page.getByRole('button', { name: 'Rastrear o grupo' }).click()
+  await expect(itens.locator('.peso')).toHaveText(['tamanho desconhecido', 'já baixado', 'já baixado'])
+  await expect(itens.nth(1).locator('input')).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Baixar 1 vídeo' })).toBeVisible()
+})
+
+test('no celular, a barra tem Início, Favoritos, Canais e Outros', async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 760 })
+  await page.goto('/#/inicio')
+  const barra = page.locator('.menu .item:visible')
+  await expect(barra).toHaveText(['Início', 'Favoritos', 'Canais', 'Outros'])
+  await page.getByRole('button', { name: 'Outros' }).click()
+  await expect(page.getByRole('heading', { name: 'Outros' })).toBeVisible()
+  await page.getByRole('link', { name: /Meus vídeos/ }).click()
+  await expect(page.getByRole('heading', { name: 'Meus vídeos' })).toBeVisible()
+  await expect(page.locator('.item.ativo-na-barra')).toHaveText('Outros')
 })

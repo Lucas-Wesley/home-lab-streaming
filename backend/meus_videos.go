@@ -48,7 +48,9 @@ CREATE TABLE IF NOT EXISTS pedidos_do_telegram (
 	baixado   INTEGER NOT NULL DEFAULT 0,
 	videos    INTEGER NOT NULL DEFAULT 0, -- já guardados
 	total     INTEGER NOT NULL DEFAULT 0, -- quantos o grupo tem para baixar
-	criado_em TEXT NOT NULL
+	criado_em TEXT NOT NULL,
+	mensagens TEXT NOT NULL DEFAULT '', -- no grupo, as mensagens escolhidas ("4,5,40"); vazio: todas
+	previsto  INTEGER NOT NULL DEFAULT 0 -- bytes que o Telegram diz que vêm
 );
 `
 
@@ -66,17 +68,19 @@ type meuVideo struct {
 }
 
 type pedidoDoTelegram struct {
-	ID       int64  `json:"id"`
-	Link     string `json:"link"`
-	Nome     string `json:"nome"`
-	Pasta    string `json:"pasta"`
-	Tudo     bool   `json:"tudo"`
-	Estado   string `json:"estado"`
-	Mensagem string `json:"mensagem,omitempty"`
-	Baixado  int64  `json:"baixado"`
-	Videos   int    `json:"videos"`
-	Total    int    `json:"total"`
-	CriadoEm string `json:"criado_em"`
+	ID         int64  `json:"id"`
+	Link       string `json:"link"`
+	Nome       string `json:"nome"`
+	Pasta      string `json:"pasta"`
+	Tudo       bool   `json:"tudo"`
+	Estado     string `json:"estado"`
+	Mensagem   string `json:"mensagem,omitempty"`
+	Baixado    int64  `json:"baixado"`
+	Videos     int    `json:"videos"`
+	Total      int    `json:"total"`
+	Previsto   int64  `json:"previsto"`
+	CriadoEm   string `json:"criado_em"`
+	escolhidas map[int64]bool
 }
 
 func programaTdl() string { return env("TDL_BIN", "tdl") }
@@ -380,11 +384,20 @@ func (a *app) acordarTelegram() {
 	}
 }
 
-const colunasDoPedido = `id, link, nome, pasta, tudo, estado, mensagem, baixado, videos, total, criado_em`
+const colunasDoPedido = `id, link, nome, pasta, tudo, estado, mensagem, baixado, videos, total, previsto, criado_em, mensagens`
 
 func lerPedido(s interface{ Scan(...any) error }) (pedidoDoTelegram, error) {
 	var p pedidoDoTelegram
-	err := s.Scan(&p.ID, &p.Link, &p.Nome, &p.Pasta, &p.Tudo, &p.Estado, &p.Mensagem, &p.Baixado, &p.Videos, &p.Total, &p.CriadoEm)
+	var mensagens string
+	err := s.Scan(&p.ID, &p.Link, &p.Nome, &p.Pasta, &p.Tudo, &p.Estado, &p.Mensagem, &p.Baixado, &p.Videos, &p.Total, &p.Previsto, &p.CriadoEm, &mensagens)
+	for _, m := range strings.Split(mensagens, ",") {
+		if id, e := strconv.ParseInt(m, 10, 64); e == nil {
+			if p.escolhidas == nil {
+				p.escolhidas = map[int64]bool{}
+			}
+			p.escolhidas[id] = true
+		}
+	}
 	return p, err
 }
 
@@ -464,6 +477,8 @@ type mensagemDoGrupo struct {
 	arquivo string
 	data    int64 // Unix
 	texto   string
+	tamanho int64   // bytes, do "raw" (a mensagem como o Telegram manda)
+	duracao float64 // segundos
 }
 
 // listaDoGrupo guarda o JSON do tdl como veio ({"id": ..., "messages": [...]}) para devolvê-lo ao
@@ -493,7 +508,23 @@ func mensagemDe(m map[string]any) mensagemDoGrupo {
 	data, _ := m["date"].(float64)
 	arquivo, _ := m["file"].(string)
 	texto, _ := m["text"].(string)
-	return mensagemDoGrupo{id: int64(id), arquivo: arquivo, data: int64(data), texto: texto}
+	v := mensagemDoGrupo{id: int64(id), arquivo: arquivo, data: int64(data), texto: texto}
+	// raw.Media.Document: o tamanho e, nos atributos do vídeo, a duração.
+	raw, _ := m["raw"].(map[string]any)
+	media, _ := raw["Media"].(map[string]any)
+	if doc, ok := media["Document"].(map[string]any); ok {
+		tamanho, _ := doc["Size"].(float64)
+		v.tamanho = int64(tamanho)
+		atributos, _ := doc["Attributes"].([]any)
+		for _, at := range atributos {
+			if at, ok := at.(map[string]any); ok {
+				if d, ok := at["Duration"].(float64); ok && d > 0 {
+					v.duracao = d
+				}
+			}
+		}
+	}
+	return v
 }
 
 // soVideos deixa na lista só os vídeos que passam no filtro, do mais antigo ao mais novo.
@@ -527,7 +558,7 @@ func (l listaDoGrupo) gravar(caminho string) error {
 
 // exportarGrupo: as mensagens com arquivo do grupo (todas, ou de "de" a "ate"), com o texto.
 func (a *app) exportarGrupo(ctx context.Context, sessao, chat string, de, ate int64, caminho string) (listaDoGrupo, error) {
-	args := []string{"chat", "export", "-c", chat, "--with-content", "-o", caminho}
+	args := []string{"chat", "export", "-c", chat, "--with-content", "--raw", "-o", caminho}
 	if de > 0 {
 		args = append(args, "-T", "id", "-i", fmt.Sprintf("%d,%d", de, ate))
 	}
@@ -643,10 +674,12 @@ func (a *app) sessaoParaRastrear() (string, func(), error) {
 }
 
 type videoDoGrupo struct {
-	Mensagem int64  `json:"mensagem"`
-	Nome     string `json:"nome"`
-	Data     string `json:"data,omitempty"`
-	Ja       bool   `json:"ja"`
+	Mensagem int64   `json:"mensagem"`
+	Nome     string  `json:"nome"`
+	Data     string  `json:"data,omitempty"`
+	Tamanho  int64   `json:"tamanho"`
+	Duracao  float64 `json:"duracao,omitempty"`
+	Ja       bool    `json:"ja"`
 }
 
 // rastrearGrupo: os vídeos do grupo, com o nome que cada um vai ganhar, e o nome do grupo.
@@ -668,7 +701,7 @@ func (a *app) rastrearGrupo(ctx context.Context, l linkDoTelegram) (string, []vi
 	ja := a.jaBaixadas(ctx, l)
 	videos := []videoDoGrupo{}
 	for _, m := range lista.soVideos(func(mensagemDoGrupo) bool { return true }) {
-		v := videoDoGrupo{Mensagem: m.id, Nome: nomeDoVideo(m.texto, m.arquivo, m.data), Ja: ja[m.id]}
+		v := videoDoGrupo{Mensagem: m.id, Nome: nomeDoVideo(m.texto, m.arquivo, m.data), Tamanho: m.tamanho, Duracao: m.duracao, Ja: ja[m.id]}
 		if m.data > 0 {
 			v.Data = time.Unix(m.data, 0).UTC().Format(time.RFC3339)
 		}
@@ -737,8 +770,13 @@ func (a *app) baixarDoTelegram(ctx context.Context, id int64) {
 			return
 		}
 		ja := a.jaBaixadas(ctx, link)
-		for _, m := range lista.soVideos(func(m mensagemDoGrupo) bool { return !ja[m.id] }) {
+		// Os escolhidos na lista do rastreio (sem escolha, todos), menos os que já estão aqui.
+		var previsto int64
+		for _, m := range lista.soVideos(func(m mensagemDoGrupo) bool {
+			return !ja[m.id] && (p.escolhidas == nil || p.escolhidas[m.id])
+		}) {
 			g.info[m.id] = m
+			previsto += m.tamanho
 		}
 		if len(g.info) == 0 {
 			a.db.ExecContext(ctx, `UPDATE pedidos_do_telegram SET estado = 'pronto', mensagem = 'Nenhum vídeo novo no grupo.' WHERE id = ?`, id)
@@ -748,7 +786,7 @@ func (a *app) baixarDoTelegram(ctx context.Context, id int64) {
 			falhar(err.Error())
 			return
 		}
-		a.db.ExecContext(ctx, `UPDATE pedidos_do_telegram SET total = ? WHERE id = ?`, len(g.info), id)
+		a.db.ExecContext(ctx, `UPDATE pedidos_do_telegram SET total = ?, previsto = ? WHERE id = ?`, len(g.info), previsto, id)
 		// Cada vídeo vai para a pasta assim que termina: dá para assistir antes do fim, e o que
 		// já veio fica mesmo se o pedido for cancelado.
 		err = g.enquanto(ctx, func() error {
@@ -956,6 +994,8 @@ func (a *app) handlePedirAoTelegram(w http.ResponseWriter, r *http.Request) {
 		Nome  string `json:"nome"`
 		Pasta string `json:"pasta"`
 		Tudo  bool   `json:"tudo"`
+		// No grupo, só estas mensagens (as marcadas na lista do rastreio); vazio: todas.
+		Mensagens []int64 `json:"mensagens"`
 	}
 	if !lerCorpo(w, r, &corpo) {
 		return
@@ -975,11 +1015,17 @@ func (a *app) handlePedirAoTelegram(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	nome := limparNome(corpo.Nome) // vazio: o nome sai da mensagem (nomeDoVideo)
+	mensagens := []string{}
 	if corpo.Tudo {
 		nome = "" // no grupo, cada vídeo ganha o seu
+		for _, m := range corpo.Mensagens {
+			if m > 0 {
+				mensagens = append(mensagens, strconv.FormatInt(m, 10))
+			}
+		}
 	}
-	res, err := a.db.ExecContext(r.Context(), `INSERT INTO pedidos_do_telegram (link, nome, pasta, tudo, criado_em) VALUES (?, ?, ?, ?, ?)`,
-		l.limpo, nome, pasta, corpo.Tudo, a.carimbo())
+	res, err := a.db.ExecContext(r.Context(), `INSERT INTO pedidos_do_telegram (link, nome, pasta, tudo, criado_em, mensagens) VALUES (?, ?, ?, ?, ?, ?)`,
+		l.limpo, nome, pasta, corpo.Tudo, a.carimbo(), strings.Join(mensagens, ","))
 	if err != nil {
 		falha(w, err)
 		return
@@ -1020,7 +1066,8 @@ func (a *app) handleRastrear(w http.ResponseWriter, r *http.Request) {
 			novos++
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"grupo": grupo, "pasta": primeiro(grupo, l.chat), "link": l.limpo, "videos": videos, "novos": novos})
+	writeJSON(w, http.StatusOK, map[string]any{"grupo": grupo, "pasta": primeiro(grupo, l.chat), "link": l.limpo, "videos": videos, "novos": novos,
+		"livre": espacoLivre(a.pastaDosMeusVideos())})
 }
 
 // handleApagarPedido: cancela (se está baixando) e tira da lista.

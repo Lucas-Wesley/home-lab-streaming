@@ -23,10 +23,11 @@ export default defineConfig({
           url: 'http://localhost:8097/player_api.php',
         },
         {
-          // Sem procurar telas na rede de casa (REDE_LOCAL aponta para uma rede vazia) nem ir ao ge.
+          // Sem procurar telas na rede de casa (REDE_LOCAL aponta para uma rede vazia) nem ir ao ge; o
+          // Telegram é o tdl falso (S42).
           command: `rm -rf "${dados}" && go run .`,
           cwd: '../backend',
-          env: { DATA_DIR: dados, ADDR: ':8098', ADDR_TELAS: ':8096', REDE_LOCAL: '192.0.2.0/30', CATALOGO_A_CADA: '0', AGENDA_URL: 'http://127.0.0.1:1/', ESPN_URL: 'http://127.0.0.1:1/', FOTMOB_URL: 'http://127.0.0.1:1/' },
+          env: { DATA_DIR: dados, ADDR: ':8098', ADDR_TELAS: ':8096', REDE_LOCAL: '192.0.2.0/30', CATALOGO_A_CADA: '0', AGENDA_URL: 'http://127.0.0.1:1/', ESPN_URL: 'http://127.0.0.1:1/', FOTMOB_URL: 'http://127.0.0.1:1/', TDL_BIN: path.resolve('../backend/testdata/tdl-falso'), TDL_FALSO_ARGS: path.join(os.tmpdir(), 'streaming-e2e-tdl') },
           url: 'http://localhost:8098/api/health',
         },
         {

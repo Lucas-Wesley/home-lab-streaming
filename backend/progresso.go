@@ -46,7 +46,7 @@ func nomeDoTorrent(s string) string {
 	return strings.Trim(s, " -")
 }
 
-var reChaveGuardavel = regexp.MustCompile(`^(filme|episodio|arquivo):\d+$`)
+var reChaveGuardavel = regexp.MustCompile(`^(filme|episodio|arquivo|proprio):\d+$`)
 
 func (a *app) progressoDe(ctx context.Context, chave string) *progresso {
 	var p progresso
@@ -87,6 +87,12 @@ func (a *app) guardarProgresso(ctx context.Context, chave string, posicao, durac
 		p.Titulo, p.Capa, p.SerieID = s.Nome, s.Capa, s.ID
 		p.Subtitulo = fmt.Sprintf("T%d E%d · %s", e.Temporada, e.Numero, e.Titulo)
 		p.tmdb = a.tmdbDaAssinatura(ctx, "serie", e.SerieID)
+	case "proprio":
+		v, err := a.meuVideo(ctx, id)
+		if err != nil {
+			return err
+		}
+		p.Titulo, p.Subtitulo, p.Capa = v.Nome, v.Pasta, v.Capa
 	case "arquivo":
 		f, t, err := a.arquivo(ctx, id)
 		if err != nil {
@@ -238,6 +244,8 @@ func (a *app) paginaDe(ctx context.Context, p progresso) string {
 		return fmt.Sprintf("#/serie/%d", p.SerieID)
 	case tipo == "filme":
 		return "#/filme/" + id
+	case tipo == "proprio":
+		return "#/meus-videos"
 	case tipo == "arquivo":
 		var hash string
 		if a.db.QueryRowContext(ctx, `SELECT hash FROM torrent_arquivos WHERE id = ?`, id).Scan(&hash) == nil {

@@ -110,7 +110,7 @@ func (a *app) downloadsDaAssinatura(ctx context.Context) ([]downloadDaAssinatura
 // usaAConexao: tocar este vídeo ocupa a assinatura? Os de torrent e os já baixados, não; tocá-los
 // não tira a conexão de quem está assistindo outra coisa pela assinatura.
 func (a *app) usaAConexao(ctx context.Context, chave string) bool {
-	if strings.HasPrefix(chave, "arquivo:") {
+	if strings.HasPrefix(chave, "arquivo:") || strings.HasPrefix(chave, "proprio:") {
 		return false
 	}
 	return a.baixadoDaAssinatura(ctx, chave) == ""

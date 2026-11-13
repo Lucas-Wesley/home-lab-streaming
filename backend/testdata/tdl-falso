@@ -1,0 +1,29 @@
+#!/bin/sh
+# tdl falso dos testes: guarda os argumentos (um por linha) em $TDL_FALSO_ARGS e faz o que o tdl
+# faria na pasta (-d) ou na lista (-o). $TDL_FALSO_ERRO: falha com esse texto. $TDL_FALSO_VIDEOS:
+# quantos vídeos a mensagem tem (padrão 1); sempre vem uma foto junto, que deve ficar de fora.
+printf '%s\n' "$@" >> "$TDL_FALSO_ARGS"
+if [ -n "$TDL_FALSO_ERRO" ]; then
+  echo "Error: $TDL_FALSO_ERRO" >&2
+  exit 1
+fi
+dir="" ; saida="" ; cmd=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -d) dir="$2"; shift ;;
+    -o) saida="$2"; shift ;;
+    dl|export) cmd="$1" ;;
+  esac
+  shift
+done
+if [ "$cmd" = "export" ]; then
+  printf '{"id":123,"messages":[{"id":4,"type":"message","file":"a.mp4"},{"id":5,"type":"message","file":"b.mp4"}]}' > "$saida"
+  exit 0
+fi
+n="${TDL_FALSO_VIDEOS:-1}"
+i=0
+while [ "$i" -lt "$n" ]; do
+  printf 'video %s' "$i" > "$dir/$((40 + i))_VID_2026_$i.mp4"
+  i=$((i + 1))
+done
+printf 'foto' > "$dir/40_IMG.jpg"

@@ -10,12 +10,20 @@ import Filme from './Filme.vue'
 import Icone from './Icone.vue'
 import Archive from './Archive.vue'
 import Inicio from './Inicio.vue'
+import MeusVideos from './MeusVideos.vue'
 import Player from './Player.vue'
 import Serie from './Serie.vue'
 import Torrent from './Torrent.vue'
 import Titulo from './Titulo.vue'
 import Torrents from './Torrents.vue'
 import { api } from './api.js'
+import { linkCompartilhado } from './meusVideos.js'
+
+// Compartilhar do Android (S42): o link de uma mensagem do Telegram chega em /compartilhar e abre
+// Meus vídeos com o link já no formulário.
+if (location.pathname === '/compartilhar') {
+  history.replaceState(null, '', `/#/meus-videos?link=${encodeURIComponent(linkCompartilhado(location.search))}`)
+}
 
 // Rotas no hash, como nas outras apps: o "voltar" do celular volta para a tela anterior.
 // O que vem depois de "?" no hash são opções da tela (título e posição no player).
@@ -36,6 +44,7 @@ const MENU = [
   { rota: 'filmes', nome: 'Filmes', icone: 'filmes' },
   { rota: 'series', nome: 'Séries', icone: 'series' },
   { rota: 'torrents', nome: 'Downloads', icone: 'torrents' },
+  { rota: 'meus-videos', nome: 'Meus vídeos', curto: 'Vídeos', icone: 'pasta' },
   { rota: 'ajustes', nome: 'Ajustes', icone: 'ajustes' },
 ]
 
@@ -108,7 +117,7 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', aoMudarHash))
           @click="ir(item.rota)"
         >
           <Icone :nome="item.icone" />
-          <span class="nome">{{ item.nome }}</span>
+          <span class="nome" :data-curto="item.curto || item.nome"><span>{{ item.nome }}</span></span>
         </button>
       </nav>
       <div class="rodape">{{ versao ? `versão ${versao.slice(0, 7)}` : 'sem conexão' }}</div>
@@ -139,6 +148,12 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', aoMudarHash))
       <Titulo v-else-if="rota.nome === 'titulo'" :key="rota.param" :param="rota.param" />
       <Torrent v-else-if="rota.nome === 'torrent'" :key="rota.param" :hash="rota.param" />
       <Archive v-else-if="rota.nome === 'archive'" />
+      <MeusVideos
+        v-else-if="rota.nome === 'meus-videos'"
+        :key="rota.param"
+        :pasta="rota.param"
+        :link="rota.opcoes.get('link') || ''"
+      />
       <Ajustes v-else-if="rota.nome === 'ajustes'" :tela="telaAnterior" :secao="rota.param" />
       <Inicio v-else :busca="rota.opcoes.get('q') || ''" />
     </main>
@@ -314,7 +329,7 @@ nav {
   }
 
   nav {
-    grid-template-columns: repeat(7, 1fr);
+    grid-template-columns: repeat(8, 1fr);
   }
 
   .item {
@@ -337,6 +352,15 @@ nav {
 
   .item.ativo {
     color: var(--marca);
+  }
+
+  /* Na barra do celular, o nome curto: oito abas numa linha. */
+  .item .nome > span {
+    display: none;
+  }
+
+  .item .nome::after {
+    content: attr(data-curto);
   }
 
   .conteudo {

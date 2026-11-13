@@ -89,6 +89,7 @@ defineProps({ nome: { type: String, required: true } })
     <template v-else-if="nome === 'mais-opcoes'">
       <circle cx="5.5" cy="12" r="1.2" fill="currentColor" /><circle cx="12" cy="12" r="1.2" fill="currentColor" /><circle cx="18.5" cy="12" r="1.2" fill="currentColor" />
     </template>
+    <path v-else-if="nome === 'pasta'" d="M3.5 7a2 2 0 012-2h4l2 2.5h7a2 2 0 012 2V17a2 2 0 01-2 2h-13a2 2 0 01-2-2z" />
     <path v-else-if="nome === 'atualizar'" d="M19.5 12a7.5 7.5 0 11-2.2-5.3M19.5 4.5v4h-4" />
   </svg>
 </template>

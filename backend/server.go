@@ -80,6 +80,14 @@ func newServer(a *app, web fs.FS, version string) http.Handler {
 	mux.HandleFunc("PUT /api/prowlarr", a.handleGuardarProwlarr)
 	mux.HandleFunc("DELETE /api/prowlarr", a.handleApagarProwlarr)
 
+	mux.HandleFunc("GET /api/meus-videos", a.handleMeusVideos) // S42: vídeos próprios, do Telegram
+	mux.HandleFunc("POST /api/meus-videos/telegram", a.handlePedirAoTelegram)
+	mux.HandleFunc("DELETE /api/meus-videos/telegram/{id}", a.handleApagarPedido)
+	mux.HandleFunc("POST /api/meus-videos/telegram/{id}/retomar", a.handleRetomarPedido)
+	mux.HandleFunc("PATCH /api/meus-videos/{id}", a.handleMudarMeuVideo)
+	mux.HandleFunc("DELETE /api/meus-videos/{id}", a.handleApagarMeuVideo)
+	mux.HandleFunc("GET /api/meus-videos/{id}/capa", a.handleCapaDoMeuVideo)
+
 	mux.HandleFunc("GET /api/favoritos", a.handleFavoritos)
 	mux.HandleFunc("GET /api/favoritos/chaves", a.handleChavesFavoritas)
 	mux.HandleFunc("PUT /api/favoritos/{tipo}/{id}", a.handleMarcarFavorito)

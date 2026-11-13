@@ -161,6 +161,9 @@ func mimeDe(extensao string) string {
 
 // fonteDe acha o vídeo pela chave. Para canais, formato diz se é HLS (app) ou TS (telas).
 func (a *app) fonteDe(ctx context.Context, tipo string, id int64, formato string) (fonte, error) {
+	if tipo == "proprio" { // meus vídeos (S42): não dependem da assinatura
+		return a.fonteDoMeuVideo(ctx, id)
+	}
 	ac, err := a.acesso()
 	if err != nil {
 		return fonte{}, err
@@ -301,6 +304,10 @@ func (a *app) servirVideo(paraTela bool) http.HandlerFunc {
 		}
 		if r.PathValue("tipo") == "arquivo" {
 			a.servirArquivoDeTorrent(w, r, id, paraTela)
+			return
+		}
+		if r.PathValue("tipo") == "proprio" {
+			a.servirMeuVideo(w, r, id, paraTela)
 			return
 		}
 		// Baixado da assinatura (S28): sai do disco, sem usar a conexão.
@@ -610,7 +617,7 @@ func (a *app) handleAssumir(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tipo, id, ok := strings.Cut(corpo.Chave, ":")
-	if _, err := strconv.ParseInt(id, 10, 64); !ok || err != nil || !map[string]bool{"filme": true, "episodio": true, "canal": true, "arquivo": true}[tipo] {
+	if _, err := strconv.ParseInt(id, 10, 64); !ok || err != nil || !map[string]bool{"filme": true, "episodio": true, "canal": true, "arquivo": true, "proprio": true}[tipo] {
 		erroJSON(w, http.StatusBadRequest, "Vídeo inválido.")
 		return
 	}

@@ -25,7 +25,8 @@ const escolhendoTela = ref(false)
 const enviando = ref('')
 const { tipo } = separarChave(props.chave)
 const aoVivo = tipo === 'canal'
-const guardaProgresso = tipo === 'filme' || tipo === 'episodio' || tipo === 'arquivo'
+const guardaProgresso = tipo === 'filme' || tipo === 'episodio' || tipo === 'arquivo' || tipo === 'proprio'
+const temLegenda = !aoVivo && tipo !== 'proprio' // meus vídeos (S42) não têm legenda
 const nome = computed(() => props.titulo || (aoVivo ? 'Ao vivo' : ''))
 const legenda = ref(null) // a escolhida para este vídeo (S21)
 const escolhendoLegenda = ref(false)
@@ -219,7 +220,7 @@ onMounted(() => {
   relogioDoProgresso = setInterval(guardarProgresso, 10000)
   document.addEventListener('visibilitychange', aoEsconder)
   window.addEventListener('pagehide', aoEsconder)
-  if (!aoVivo) {
+  if (temLegenda) {
     api(`/api/legendas/${props.chave}`)
       .then((r) => {
         legenda.value = r.escolhida
@@ -250,7 +251,7 @@ onBeforeUnmount(() => {
     <header class="barra">
       <button class="botao icone" aria-label="Voltar" @click="voltar('#/inicio')"><Icone nome="voltar" /></button>
       <span class="titulo">{{ nome }}</span>
-      <button v-if="!aoVivo" class="botao icone" :class="{ ligada: legenda }" aria-label="Legendas" title="Legendas" @click="escolhendoLegenda = true">
+      <button v-if="temLegenda" class="botao icone" :class="{ ligada: legenda }" aria-label="Legendas" title="Legendas" @click="escolhendoLegenda = true">
         <Icone nome="legenda" />
       </button>
       <button v-if="telas.length" class="botao icone" aria-label="Assistir numa tela" title="Assistir numa tela" @click="escolhendoTela = true">

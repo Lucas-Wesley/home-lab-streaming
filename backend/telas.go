@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	"net/http/httptrace"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -34,6 +36,7 @@ type tela struct {
 	volume       string
 	descricao    string
 	VistaEm      string `json:"vista_em"`
+	Toca4K       bool   `json:"toca_4k"` // S43: o projetor aceita o vídeo 4K e para no 0 sem tocar
 	Ligada       bool   `json:"ligada"`
 }
 
@@ -191,11 +194,11 @@ func (c *controleDasTelas) pararParaOAudio(ctx context.Context, chave string) (v
 
 // ---------- Banco ----------
 
-const colunasDaTela = `id, nome, nome_original, fabricante, endereco, transporte, volume, descricao, vista_em`
+const colunasDaTela = `id, nome, nome_original, fabricante, endereco, transporte, volume, descricao, vista_em, toca_4k`
 
 func lerTela(s interface{ Scan(...any) error }) (tela, error) {
 	var t tela
-	err := s.Scan(&t.ID, &t.Nome, &t.NomeOriginal, &t.Fabricante, &t.Endereco, &t.transporte, &t.volume, &t.descricao, &t.VistaEm)
+	err := s.Scan(&t.ID, &t.Nome, &t.NomeOriginal, &t.Fabricante, &t.Endereco, &t.transporte, &t.volume, &t.descricao, &t.VistaEm, &t.Toca4K)
 	return t, err
 }
 
@@ -507,6 +510,7 @@ func (c *controleDasTelas) maisNova(t tela) tela {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if n, ok := c.enderecos[t.ID]; ok {
+		n.Toca4K = t.Toca4K // o endereço novo vem do aparelho; o ajuste, do banco
 		return n
 	}
 	return t
@@ -603,6 +607,9 @@ func (c *controleDasTelas) tocar(ctx context.Context, t tela, tipo string, id in
 	if err != nil {
 		return sessao{}, err
 	}
+	if !t.Toca4K && !f.aoVivo && c.a.e4K(ctx, tipo, id, f.titulo) {
+		return sessao{}, errNaoToca4K
+	}
 	extensao := "ts"
 	if !f.aoVivo {
 		extensao = f.url[strings.LastIndex(f.url, ".")+1:]
@@ -649,6 +656,27 @@ func (c *controleDasTelas) tocar(ctx context.Context, t tela, tipo string, id in
 		go c.acompanhar(t, s.Desde)
 	}
 	return s, nil
+}
+
+var errNaoToca4K = errors.New("a tela não toca 4K")
+
+var reNome4K = regexp.MustCompile(`(?i)\b(4K|2160p|UHD)\b`)
+
+// e4K diz se o vídeo é 4K pelos formatos já lidos (sem ler de novo: a conexão pode estar ocupada)
+// ou, se ainda não foram lidos, pelo nome ("O Convite 4K"). S43: o projetor (Whale TV, 2K) recebe
+// o vídeo, lê a duração e para no 0; 1080p, inclusive H.265, toca.
+func (a *app) e4K(ctx context.Context, tipo string, id int64, nome string) bool {
+	var dados string
+	if tipo == "arquivo" {
+		a.db.QueryRowContext(ctx, `SELECT sondagem FROM torrent_arquivos WHERE id = ?`, id).Scan(&dados)
+	} else {
+		a.db.QueryRowContext(ctx, `SELECT dados FROM formatos_da_assinatura WHERE chave = ?`, fmt.Sprintf("%s:%d", tipo, id)).Scan(&dados)
+	}
+	var s sondagem
+	if dados != "" && json.Unmarshal([]byte(dados), &s) == nil && (s.Largura > 0 || s.Altura > 0) {
+		return s.Largura > 2560 || s.Altura > 1600
+	}
+	return reNome4K.MatchString(nome)
 }
 
 // irQuandoTocar espera o vídeo andar de verdade e vai até a posição. O projetor diz PLAYING
@@ -887,18 +915,27 @@ func (a *app) handleMudarTela(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var corpo struct {
-		Nome string `json:"nome"`
+		Nome   *string `json:"nome"`
+		Toca4K *bool   `json:"toca_4k"`
 	}
 	if !lerCorpo(w, r, &corpo) {
 		return
 	}
-	nome := strings.TrimSpace(corpo.Nome)
-	if nome == "" {
-		nome = t.NomeOriginal
+	if corpo.Nome != nil {
+		nome := strings.TrimSpace(*corpo.Nome)
+		if nome == "" {
+			nome = t.NomeOriginal
+		}
+		if _, err := a.db.ExecContext(r.Context(), `UPDATE telas SET nome = ? WHERE id = ?`, nome, t.ID); err != nil {
+			falha(w, err)
+			return
+		}
 	}
-	if _, err := a.db.ExecContext(r.Context(), `UPDATE telas SET nome = ? WHERE id = ?`, nome, t.ID); err != nil {
-		falha(w, err)
-		return
+	if corpo.Toca4K != nil {
+		if _, err := a.db.ExecContext(r.Context(), `UPDATE telas SET toca_4k = ? WHERE id = ?`, *corpo.Toca4K, t.ID); err != nil {
+			falha(w, err)
+			return
+		}
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -931,6 +968,10 @@ func (a *app) handleTocarNaTela(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s, err := a.telas.tocar(r.Context(), t, tipo, id, corpo.Posicao, corpo.Capa)
+	if errors.Is(err, errNaoToca4K) {
+		erroJSON(w, http.StatusUnprocessableEntity, t.Nome+" não toca vídeo 4K. Escolha outra cópia deste título (1080p ou menor).")
+		return
+	}
 	if errors.Is(err, sql.ErrNoRows) {
 		erroJSON(w, http.StatusNotFound, "Vídeo não encontrado.")
 		return

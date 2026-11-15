@@ -132,6 +132,16 @@ async function renomear(t) {
   }
 }
 
+// S43: o projetor (2K) recebe o 4K e para no 0; marcado aqui, o app avisa antes de mandar.
+async function alternar4K(t) {
+  try {
+    await api(`/api/telas/${encodeURIComponent(t.id)}`, { metodo: 'PATCH', corpo: { toca_4k: !t.toca_4k } })
+    await carregarTelas(true)
+  } catch (e) {
+    recado(e.message, true)
+  }
+}
+
 async function esquecer(t) {
   if (!confirm(`Tirar “${t.nome}” da lista? Ela volta na próxima procura, se estiver ligada.`)) return
   try {
@@ -341,6 +351,7 @@ onBeforeUnmount(() => clearInterval(relogio))
           <span class="nome">{{ t.nome }} <span class="chip" :class="{ ok: t.ligada }">{{ t.ligada ? 'ligada' : 'não respondeu' }}</span></span>
           <span class="detalhe">{{ t.fabricante }} · {{ t.endereco }}<template v-if="t.nome !== t.nome_original"> · {{ t.nome_original }}</template></span>
         </button>
+        <button class="botao pequeno" :title="t.toca_4k ? 'Toque se esta tela não toca vídeo 4K' : 'Toque se esta tela toca vídeo 4K'" @click="alternar4K(t)">{{ t.toca_4k ? 'Toca 4K' : 'Sem 4K' }}</button>
         <button class="botao icone" aria-label="Tirar da lista" title="Tirar da lista" @click="esquecer(t)"><Icone nome="fechar" /></button>
       </li>
     </ul>
@@ -531,6 +542,13 @@ onBeforeUnmount(() => clearInterval(relogio))
 
 .opcao input {
   accent-color: var(--marca);
+}
+
+.tela .botao.pequeno {
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 0.78rem;
+  white-space: nowrap;
 }
 
 .tela {

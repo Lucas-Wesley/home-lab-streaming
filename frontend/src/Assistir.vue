@@ -19,6 +19,10 @@ const enviando = ref('')
 
 const continuar = computed(() => props.posicao > 30)
 const aviso = computed(() => noAparelho(props.formatos))
+// S43: o projetor (2K) para no 0 com vídeo 4K; o botão dele avisa antes de mandar.
+const e4K = computed(() => (props.formatos?.largura || 0) > 2560 || (props.formatos?.altura || 0) > 1600)
+const semAs4K = computed(() => (e4K.value ? telas.value.filter((t) => t.toca_4k === false) : []))
+const naoToca = (t) => semAs4K.value.includes(t)
 
 function aqui(posicao) {
   emit('escolheu')
@@ -60,15 +64,19 @@ onMounted(() => carregarTelas())
         v-for="t in telas"
         :key="t.id"
         class="botao"
-        :disabled="!!enviando"
-        :title="t.ligada ? '' : 'Não respondeu agora: está ligada?'"
+        :disabled="!!enviando || naoToca(t)"
+        :title="naoToca(t) ? 'Esta tela não toca 4K' : t.ligada ? '' : 'Não respondeu agora: está ligada?'"
         @click="naTela(t, continuar ? posicao : 0)"
       >
         <Icone nome="tela" />
         {{ enviando === t.id ? 'Mandando…' : t.nome }}
-        <span v-if="!t.ligada" class="chip">desligada?</span>
+        <span v-if="naoToca(t)" class="chip">não toca 4K</span>
+        <span v-else-if="!t.ligada" class="chip">desligada?</span>
       </button>
     </div>
+    <p v-if="semAs4K.length" class="aviso-do-aparelho">
+      Esta cópia é 4K: {{ semAs4K.map((t) => t.nome).join(' e ') }} não {{ semAs4K.length > 1 ? 'tocam' : 'toca' }}. Para {{ semAs4K.length > 1 ? 'elas' : 'ela' }}, escolha outra cópia deste título.
+    </p>
   </div>
 </template>
 

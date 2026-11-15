@@ -364,3 +364,65 @@ func TestPosicaoDaTelaGuardadaSemOCelular(t *testing.T) {
 		t.Fatalf("posição ao parar: %v", guardada)
 	}
 }
+
+// S43: o projetor (2K) recebe um vídeo 4K, lê a duração e para no 0. Marcado como "não toca 4K",
+// o servidor nem manda: avisa para escolher outra cópia. 1080p continua indo, e a TV toca 4K.
+func TestTelaQueNaoToca4K(t *testing.T) {
+	e := novoAmbiente(t)
+	tv := novaTVFalsa(t)
+	te := registrarTV(t, e, tv)
+	caminho := "/api/telas/" + url.PathEscape(te.ID)
+
+	var lista []tela
+	e.json(t, "/api/telas", &lista)
+	if len(lista) != 1 || !lista[0].Toca4K {
+		t.Fatalf("toda tela começa tocando 4K: %+v", lista)
+	}
+	if status, corpo := e.pedir(t, "PATCH", caminho, map[string]any{"toca_4k": false}); status != 204 {
+		t.Fatalf("%d %s", status, corpo)
+	}
+	e.json(t, "/api/telas", &lista)
+	if lista[0].Toca4K || lista[0].Nome != "50\" TV de Teste" {
+		t.Fatalf("mudar o 4K não mexe no nome: %+v", lista[0])
+	}
+
+	formatos := func(largura, altura int) {
+		t.Helper()
+		if _, err := e.a.db.Exec(`INSERT OR REPLACE INTO formatos_da_assinatura (chave, dados, quando) VALUES ('filme:200', ?, '2026-01-01T00:00:00Z')`,
+			fmt.Sprintf(`{"duracao":5400,"video":"hevc","largura":%d,"altura":%d,"audios":[]}`, largura, altura)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	formatos(3840, 2074)
+	status, corpo := e.pedir(t, "POST", caminho+"/tocar", map[string]any{"chave": "filme:200"})
+	if status != 422 || !strings.Contains(corpo, "não toca vídeo 4K") {
+		t.Fatalf("%d %s", status, corpo)
+	}
+	if tv.recebeu("SetAVTransportURI") {
+		t.Fatal("mandou o 4K para a tela que não toca")
+	}
+	if chave, _ := e.a.conexao.donoAtual(); chave != "" {
+		t.Fatalf("tomou a assinatura sem tocar: %s", chave)
+	}
+
+	formatos(1920, 1080)
+	if status, corpo := e.pedir(t, "POST", caminho+"/tocar", map[string]any{"chave": "filme:200"}); status != 200 {
+		t.Fatalf("1080p: %d %s", status, corpo)
+	}
+
+	formatos(3840, 2160)
+	e.pedir(t, "PATCH", caminho, map[string]any{"toca_4k": true})
+	if status, corpo := e.pedir(t, "POST", caminho+"/tocar", map[string]any{"chave": "filme:200"}); status != 200 {
+		t.Fatalf("4K na tela que toca: %d %s", status, corpo)
+	}
+}
+
+func TestE4KPeloNomeSemFormatos(t *testing.T) {
+	e := novoAmbiente(t)
+	ctx := context.Background()
+	for nome, quer := range map[string]bool{"O Convite 4K": true, "Duna 2160p": true, "Filme UHD": true, "O Convite [L]": false, "Duna": false, "Os 4Kas": false} {
+		if e.a.e4K(ctx, "filme", 999, nome) != quer {
+			t.Errorf("%q: quer %v", nome, quer)
+		}
+	}
+}

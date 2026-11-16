@@ -51,7 +51,8 @@ Mesma infraestrutura e mesmo design system (`docs/DESIGN-SYSTEM.md`) das outras 
   buscada pelo código do TMDB, nunca pelo nome; o áudio da assinatura só com a conexão livre (`fonteDoAudio`).
 - **Meus vídeos** (S42, `meus_videos.go`): o tdl roda com a conta do Telegram do Lucas (sessão em `/data/telegram`,
   nunca no Git). Nos testes, só `testdata/tdl-falso` (`TDL_BIN`; `novoAmbiente` aponta para um tdl que não existe).
-  Um tdl por vez: a sessão é um banco que só um processo abre.
+  Um tdl por vez: a sessão é um banco que só um processo abre. A **Trilha** toca esses vídeos direto pela
+  `GET /api/video/proprio/<id>.mp4` (videoaula, T30 de lá): mudar essa rota é mudar a Trilha também.
 - **Títulos para verificar** (S37): o Lucas manda títulos estranhos pelo menu ⋯ da página do título. Quando ele
   pedir para "verificar os títulos reportados", seguir [`docs/PARA-VERIFICAR.md`](docs/PARA-VERIFICAR.md).
 - **Commits:** autoria do Lucas; **sem linha `Co-Authored-By`**.

@@ -78,10 +78,25 @@ async function assistir() {
   }
 }
 
-async function baixar() {
+// Baixar um filme ou episódio pergunta antes se já prepara a legenda dupla (S46), que grava sozinha
+// quando o download termina; a temporada inteira baixa direto.
+const escolhendoDownload = ref(false)
+function clicarBaixar() {
+  if (props.baixarTemporada) baixar()
+  else escolhendoDownload.value = true
+}
+
+async function baixar(comDupla = false) {
+  escolhendoDownload.value = false
   preparando.value = 'baixar'
   try {
     const { hash, arquivo } = await preparar()
+    if (comDupla) {
+      await api(`/api/arquivos/${arquivo.id}/baixar`, { metodo: 'POST' })
+      await api(`/api/legenda-dupla/arquivo:${arquivo.id}`, { metodo: 'POST', corpo: { comeco: 0, esperar: true } })
+      recado('Baixando para o servidor; depois, a legenda dupla grava sozinha. Acompanhe em Downloads.')
+      return
+    }
     let ids = [arquivo.id]
     if (props.baixarTemporada) {
       const d = await api(`/api/torrents/${hash}`)
@@ -127,7 +142,7 @@ function quando(iso) {
       <button class="botao" :class="{ principal: r.recomendado && !semDestaque }" :disabled="!!preparando" @click="assistir">
         <Icone nome="tocar" />{{ preparando === 'assistir' ? 'Abrindo…' : 'Assistir' }}
       </button>
-      <button class="botao so-icone" :disabled="!!preparando" :title="baixarTemporada ? 'Baixar a temporada para o servidor' : 'Baixar para o servidor'" :aria-label="baixarTemporada ? 'Baixar temporada' : 'Baixar'" @click="baixar">
+      <button class="botao so-icone" :disabled="!!preparando" :title="baixarTemporada ? 'Baixar a temporada para o servidor' : 'Baixar para o servidor'" :aria-label="baixarTemporada ? 'Baixar temporada' : 'Baixar'" @click="clicarBaixar">
         <Icone nome="torrents" />
       </button>
     </span>
@@ -145,6 +160,15 @@ function quando(iso) {
     >
       <p v-if="v && v.estado !== 'ok'" class="suave nota-da-folha">Verificação: {{ ESTADOS[v.estado]?.texto }} {{ v.estado === 'verificando' ? '' : v.resumo }}</p>
     </FolhaDeAssistir>
+
+    <Folha v-if="escolhendoDownload" titulo="Baixar para o servidor" @fechar="escolhendoDownload = false">
+      <p class="suave nome-do-arquivo">{{ r.titulo }}</p>
+      <div class="opcoes-de-download">
+        <button class="botao principal" @click="baixar(false)"><Icone nome="torrents" />Só baixar</button>
+        <button class="botao" @click="baixar(true)"><Icone nome="legenda" />Baixar e preparar a legenda dupla</button>
+      </div>
+      <p class="suave nota">A legenda dupla grava inglês e português na imagem, para a TV e o projetor. Começa quando o download termina; aviso no celular quando ficar pronta.</p>
+    </Folha>
 
     <Folha v-if="vendoDetalhes && v" titulo="Verificação" @fechar="vendoDetalhes = false">
       <p class="suave nome-do-arquivo">{{ v.arquivo || r.titulo }}</p>
@@ -166,6 +190,12 @@ function quando(iso) {
 </template>
 
 <style scoped>
+.opcoes-de-download {
+  display: grid;
+  gap: 8px;
+  margin: 4px 0 10px;
+}
+
 .opcao {
   display: flex;
   gap: 10px;

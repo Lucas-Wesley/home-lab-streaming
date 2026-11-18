@@ -139,6 +139,7 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', aoMudarHash))
         :chave="rota.param"
         :titulo="rota.opcoes.get('titulo') || ''"
         :inicio="Number(rota.opcoes.get('t')) || 0"
+        :dupla="rota.opcoes.get('dupla') === '1'"
       />
       <Controle v-else-if="rota.nome === 'controle'" :key="rota.param" :id="rota.param" />
       <Filme v-else-if="rota.nome === 'filme'" :key="rota.param" :id="rota.param" />

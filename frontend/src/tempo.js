@@ -27,10 +27,11 @@ export function enderecoDoVideo(chave) {
   return tipo === 'canal' ? `/api/video/canal/${id}.m3u8` : `/api/video/${tipo}/${id}.mp4`
 }
 
-export function rotaDoPlayer(chave, { titulo = '', posicao = 0 } = {}) {
+export function rotaDoPlayer(chave, { titulo = '', posicao = 0, dupla = false } = {}) {
   const q = new URLSearchParams()
   if (titulo) q.set('titulo', titulo)
   if (posicao > 0) q.set('t', String(Math.floor(posicao)))
+  if (dupla) q.set('dupla', '1')
   const extra = q.toString()
   return `#/assistir/${chave}${extra ? `?${extra}` : ''}`
 }

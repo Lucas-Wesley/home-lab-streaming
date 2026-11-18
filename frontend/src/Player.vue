@@ -15,6 +15,7 @@ const props = defineProps({
   chave: { type: String, required: true },
   titulo: { type: String, default: '' },
   inicio: { type: Number, default: 0 },
+  dupla: { type: Boolean, default: false }, // a versão com a legenda dupla gravada na imagem (S46)
 })
 const recado = inject('recado')
 
@@ -26,7 +27,9 @@ const enviando = ref('')
 const { tipo } = separarChave(props.chave)
 const aoVivo = tipo === 'canal'
 const guardaProgresso = tipo === 'filme' || tipo === 'episodio' || tipo === 'arquivo' || tipo === 'proprio'
-const temLegenda = !aoVivo && tipo !== 'proprio' // meus vídeos (S42) não têm legenda
+// Meus vídeos (S42) não têm legenda; a dupla já tem as duas na imagem (S46).
+const temLegenda = !aoVivo && tipo !== 'proprio' && !props.dupla
+const enderecoDaqui = () => enderecoDoVideo(props.chave) + (props.dupla ? '?dupla=1' : '')
 const nome = computed(() => props.titulo || (aoVivo ? 'Ao vivo' : ''))
 const legenda = ref(null) // a escolhida para este vídeo (S21)
 const escolhendoLegenda = ref(false)
@@ -50,7 +53,7 @@ async function abrir() {
     return
   }
   const v = video.value
-  const endereco = enderecoDoVideo(props.chave)
+  const endereco = enderecoDaqui()
   if (aoVivo && !v.canPlayType('application/vnd.apple.mpegurl')) {
     const { default: Hls } = await import('hls.js')
     if (!Hls.isSupported()) {
@@ -78,7 +81,7 @@ function aoCarregar() {
 // O vídeo não abriu: ou outro aparelho assumiu a assinatura, ou o formato não toca aqui.
 async function falhou() {
   try {
-    const r = await fetch(enderecoDoVideo(props.chave), { method: 'HEAD' })
+    const r = await fetch(enderecoDaqui(), { method: 'HEAD' })
     if (r.status === 409) {
       outraTela.value = true
       erro.value = 'Outro aparelho começou a assistir, e a assinatura só deixa um por vez.'
@@ -203,7 +206,7 @@ async function mandarParaTela(tela) {
   const posicao = aoVivo ? 0 : video.value?.currentTime || 0
   try {
     await guardarProgresso()
-    await tocarNaTela(tela, props.chave, { posicao })
+    await tocarNaTela(tela, props.chave, { posicao, dupla: props.dupla })
     video.value?.pause()
     escolhendoTela.value = false
     location.hash = `#/controle/${encodeURIComponent(tela.id)}`

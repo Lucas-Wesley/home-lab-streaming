@@ -278,7 +278,7 @@ func TestLegendaGeradaNaTela(t *testing.T) {
 	if err := e.a.escolherGerada(ctx, chave); err != nil {
 		t.Fatal(err)
 	}
-	s, err := e.a.telas.tocar(ctx, te, "filme", 200, 0, "")
+	s, err := e.a.telas.tocar(ctx, te, "filme", 200, 0, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}

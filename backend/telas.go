@@ -50,6 +50,12 @@ type sessao struct {
 	Desde  string  `json:"desde"`
 	// Legenda gerada que ainda cresce (S29): até onde ela ia quando foi para a tela; 0 se não é o caso.
 	legendaAte float64
+	// Legenda dupla (S46): a versão com inglês e português na imagem. Crescendo: ainda gravando, a
+	// tela recebe um fluxo contínuo a partir de deslocamento, sem saber a duração.
+	Dupla          bool `json:"dupla,omitempty"`
+	Crescendo      bool `json:"crescendo,omitempty"`
+	deslocamento   float64
+	duracaoDoFilme float64
 }
 
 type controleDasTelas struct {
@@ -150,7 +156,7 @@ func (c *controleDasTelas) atualizarLegendaGerada(t tela, s sessao, posicao floa
 	}
 	id, _ := strconv.ParseInt(m[2], 10, 64)
 	log.Printf("tela %s: mais legenda gerada pronta (até %.0f s), mandando o vídeo de novo", t.ID, agora)
-	c.tocar(ctx, t, m[1], id, posicao, s.Capa)
+	c.tocar(ctx, t, m[1], id, posicao, s.Capa, s.Dupla)
 }
 
 // pararParaOAudio para a tela que toca este vídeo (pela assinatura) para o servidor puxar o
@@ -186,7 +192,7 @@ func (c *controleDasTelas) pararParaOAudio(ctx context.Context, chave string) (v
 		id, _ := strconv.ParseInt(m[2], 10, 64)
 		c2, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
-		if _, err := c.tocar(c2, t, m[1], id, posicao, s.Capa); err != nil {
+		if _, err := c.tocar(c2, t, m[1], id, posicao, s.Capa, s.Dupla); err != nil {
 			log.Printf("tela %s: não voltou depois de puxar o áudio: %v", t.ID, err)
 		}
 	}, true
@@ -601,7 +607,10 @@ func arteDaCapa(capa string) string {
 }
 
 // tocar manda a tela abrir o vídeo e, se for o caso, ir até onde o Lucas parou.
-func (c *controleDasTelas) tocar(ctx context.Context, t tela, tipo string, id int64, posicao float64, capa string) (sessao, error) {
+func (c *controleDasTelas) tocar(ctx context.Context, t tela, tipo string, id int64, posicao float64, capa string, dupla bool) (sessao, error) {
+	if dupla {
+		return c.tocarDupla(ctx, t, tipo, id, posicao, capa)
+	}
 	formato := "ts"
 	f, err := c.a.fonteDe(ctx, tipo, id, formato)
 	if err != nil {
@@ -748,6 +757,9 @@ type estadoDaTela struct {
 	// Idade: há quantos milissegundos a posição foi lida, na hora da resposta. A legenda no celular
 	// (S31) conta o tempo a partir da leitura, e não da chegada da resposta.
 	Idade int64 `json:"idade_ms"`
+	// Carregado: os trechos do vídeo que a tela já pode tocar sem esperar (a barra mais clara do
+	// controle): o que a legenda dupla já gravou, ou o que o torrent já baixou.
+	Carregado [][2]float64 `json:"carregado,omitempty"`
 }
 
 func (c *controleDasTelas) estado(ctx context.Context, t tela) (estadoDaTela, error) {
@@ -785,6 +797,14 @@ func (c *controleDasTelas) estado(ctx context.Context, t tela) (estadoDaTela, er
 		}
 	}
 	c.mu.Unlock()
+	if e.Sessao != nil && e.Sessao.Crescendo {
+		// O fluxo da dupla que ainda grava começa no pedaço pedido, e a tela não sabe a duração.
+		e.Posicao += e.Sessao.deslocamento
+		e.Duracao = e.Sessao.duracaoDoFilme
+	}
+	if e.Sessao != nil && !e.Sessao.AoVivo {
+		e.Carregado = c.a.carregadoDe(ctx, *e.Sessao, e.Duracao)
+	}
 	if e.Sessao != nil && !e.Sessao.AoVivo && e.Posicao > 0 {
 		c.a.guardarProgressoDaTela(*e.Sessao, e.Posicao, e.Duracao)
 	}
@@ -818,23 +838,27 @@ func (c *controleDasTelas) comandar(ctx context.Context, t tela, comando string,
 		c.mu.Lock()
 		delete(c.sessoes, t.ID)
 		c.mu.Unlock()
-	case "ir":
+	case "ir", "pular":
+		c.mu.Lock()
+		s, ok := c.sessoes[t.ID]
+		c.mu.Unlock()
+		if ok && s.Crescendo {
+			alvo := valor
+			if comando == "pular" {
+				e, er := c.estado(ctx, t)
+				if er != nil {
+					return er
+				}
+				alvo = e.Posicao + valor
+			}
+			return c.irNaDupla(ctx, t, s, alvo)
+		}
+		if comando == "pular" {
+			return c.pular(ctx, t, valor)
+		}
 		_, err = c.acao(ctx, t, "Seek", [][2]string{{"Unit", "REL_TIME"}, {"Target", relogio(max(0, valor))}})
 		if errors.Is(err, errTelaDemorou) {
 			err = nil // a TV está indo; o próximo estado mostra onde chegou
-		}
-	case "pular":
-		pos, e := c.acao(ctx, t, "GetPositionInfo", nil)
-		if e != nil {
-			return e
-		}
-		alvo := max(0, segundosDe(pos["RelTime"])+valor)
-		if d := segundosDe(pos["TrackDuration"]); d > 0 {
-			alvo = min(alvo, d-2)
-		}
-		_, err = c.acao(ctx, t, "Seek", [][2]string{{"Unit", "REL_TIME"}, {"Target", relogio(alvo)}})
-		if errors.Is(err, errTelaDemorou) {
-			err = nil
 		}
 	case "volume", "mudo":
 		if comando == "volume" {
@@ -853,6 +877,22 @@ func (c *controleDasTelas) comandar(ctx context.Context, t tela, comando string,
 }
 
 var errComandoDesconhecido = errors.New("comando desconhecido")
+
+func (c *controleDasTelas) pular(ctx context.Context, t tela, valor float64) error {
+	pos, e := c.acao(ctx, t, "GetPositionInfo", nil)
+	if e != nil {
+		return e
+	}
+	alvo := max(0, segundosDe(pos["RelTime"])+valor)
+	if d := segundosDe(pos["TrackDuration"]); d > 0 {
+		alvo = min(alvo, d-2)
+	}
+	_, err := c.acao(ctx, t, "Seek", [][2]string{{"Unit", "REL_TIME"}, {"Target", relogio(alvo)}})
+	if errors.Is(err, errTelaDemorou) {
+		err = nil
+	}
+	return err
+}
 
 // ---------- Rotas ----------
 
@@ -957,6 +997,7 @@ func (a *app) handleTocarNaTela(w http.ResponseWriter, r *http.Request) {
 		Chave   string  `json:"chave"`
 		Posicao float64 `json:"posicao"`
 		Capa    string  `json:"capa"`
+		Dupla   bool    `json:"dupla"` // a versão com a legenda dupla na imagem (S46)
 	}
 	if !lerCorpo(w, r, &corpo) {
 		return
@@ -967,7 +1008,11 @@ func (a *app) handleTocarNaTela(w http.ResponseWriter, r *http.Request) {
 		erroJSON(w, http.StatusBadRequest, "Vídeo inválido.")
 		return
 	}
-	s, err := a.telas.tocar(r.Context(), t, tipo, id, corpo.Posicao, corpo.Capa)
+	s, err := a.telas.tocar(r.Context(), t, tipo, id, corpo.Posicao, corpo.Capa, corpo.Dupla)
+	if errors.Is(err, errDuplaSemPedido) || errors.Is(err, errDuplaAindaNao) {
+		erroJSON(w, http.StatusConflict, err.Error())
+		return
+	}
 	if errors.Is(err, errNaoToca4K) {
 		erroJSON(w, http.StatusUnprocessableEntity, t.Nome+" não toca vídeo 4K. Escolha outra cópia deste título (1080p ou menor).")
 		return

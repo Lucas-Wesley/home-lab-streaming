@@ -54,6 +54,7 @@ const videos = computed(() => {
   const torrent = (deTorrent.value || []).map((v) => ({
     chave: `arquivo:${v.id}`, titulo: v.titulo + episodio(v), capa: v.capa, origem: 'Torrent', detalhe: v.torrent !== v.titulo ? v.torrent : '',
     tamanho: v.tamanho, baixado: v.baixado, estado: v.estado, pagina: v.tmdb ? `#/titulo/${v.tmdb}` : '',
+    dupla: v.dupla || '', duplaParte: v.dupla_parte || 0,
     apagar: () => api(`/api/arquivos/${v.id}/baixar`, { metodo: 'DELETE' }),
   }))
   return [...assinatura, ...torrent].sort((a, b) => (a.estado === 'baixado') - (b.estado === 'baixado'))
@@ -62,6 +63,20 @@ const carregado = computed(() => daAssinatura.value && deTorrent.value)
 const meta = (v) =>
   [v.origem, tamanho(v.tamanho), (ESTADOS[v.estado] || v.estado) + (v.estado !== 'baixado' && v.tamanho ? ` ${porcentagem(v)}%` : '')].filter(Boolean).join(' · ')
 const porcentagem = (v) => (v.tamanho ? Math.floor((v.baixado / v.tamanho) * 100) : 0)
+
+// Legenda dupla (S46): pedir daqui grava o filme inteiro (do começo); se ainda baixa, espera o fim.
+const DUPLA = { 'na fila': 'na fila', sincronizando: 'sincronizando', gravando: 'gravando', juntando: 'quase pronta', pronta: 'pronta', erro: 'deu erro' }
+const textoDaDupla = (v) => `Legenda dupla ${DUPLA[v.dupla] || v.dupla}${v.dupla === 'gravando' ? ` ${Math.floor(v.duplaParte * 100)}%` : ''}`
+
+async function prepararDupla(v) {
+  try {
+    await api(`/api/legenda-dupla/${v.chave}`, { metodo: 'POST', corpo: { comeco: 0, esperar: v.estado !== 'baixado' } })
+    recado(v.estado === 'baixado' ? 'Gravando a legenda dupla. Aviso no celular quando ficar pronta.' : 'A legenda dupla grava quando o download terminar.')
+    carregar()
+  } catch (e) {
+    recado(e.message, true)
+  }
+}
 
 async function apagar(v) {
   if (!confirm(`Apagar "${v.titulo}" do servidor?`)) return
@@ -181,6 +196,8 @@ onBeforeUnmount(() => clearInterval(relogio))
             <span v-if="v.estado !== 'baixado' && v.tamanho" class="progresso"><span :style="{ width: `${porcentagem(v)}%` }" /></span>
             <span v-if="v.detalhe" class="suave detalhe">{{ v.detalhe }}</span>
             <span v-if="v.mensagem" class="suave mensagem">{{ v.mensagem }}</span>
+            <span v-if="v.dupla" class="chip" :class="{ ok: v.dupla === 'pronta', erro: v.dupla === 'erro', andando: !['pronta', 'erro'].includes(v.dupla) }">{{ textoDaDupla(v) }}</span>
+            <button v-else-if="v.origem === 'Torrent'" class="limpar dupla" type="button" @click="prepararDupla(v)">Preparar legenda dupla</button>
           </span>
           <span class="acoes">
             <button v-if="v.estado === 'baixado'" class="botao principal" @click="assistindo = v"><Icone nome="tocar" />Assistir</button>
@@ -372,6 +389,15 @@ a.titulo {
 
 a.titulo:hover {
   color: var(--marca);
+}
+
+.texto .chip {
+  justify-self: start;
+}
+
+.dupla {
+  justify-self: start;
+  font-size: 0.8rem;
 }
 
 .detalhe {

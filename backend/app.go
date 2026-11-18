@@ -73,7 +73,9 @@ type app struct {
 	// Documentários para o Acervo (S41): o trabalhador dos envios acorda por aqui.
 	enviosAcordar chan struct{}
 	// Meus vídeos (S42): a fila do Telegram acorda por aqui.
-	telegramAcordar   chan struct{}
+	telegramAcordar chan struct{}
+	// Legenda dupla (S46): a gravação de um vídeo por vez.
+	duplas            *duplas
 	liberarMu         sync.Mutex
 	liberarParaOAudio map[string]bool
 	// Jogos do dia (S33, S34): as agendas (ge, ESPN, FotMob) e o guia dos canais, guardados por um tempo.
@@ -106,6 +108,7 @@ func novoApp(db *sql.DB, cfg config) (*app, error) {
 		agora:                        time.Now,
 		emFundo:                      func(f func()) { go f() },
 		motor:                        novoMotor(cfg.pastaDosTorrents, cfg.semDHT),
+		duplas:                       &duplas{acordar: make(chan struct{}, 1), leitores: map[string]int{}},
 		downloads:                    &downloads{progressos: map[int64]int64{}, cancelar: map[int64]context.CancelFunc{}},
 		avisos:                       novoAvisador(cfg.ntfy),
 	}

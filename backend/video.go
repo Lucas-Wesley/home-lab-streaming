@@ -299,6 +299,10 @@ func (a *app) servirVideo(paraTela bool) http.HandlerFunc {
 			return
 		}
 		id, _ := strconv.ParseInt(m[1], 10, 64)
+		if r.PathValue("tipo") == "arquivo" && r.URL.Query().Get("dupla") == "1" {
+			a.servirDupla(w, r, id, paraTela) // legenda dupla (S46)
+			return
+		}
 		if paraTela {
 			a.legendaNaTela(w, r)
 		}

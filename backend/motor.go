@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"os"
 	"path/filepath"
 	"sync"
@@ -251,4 +252,40 @@ func (m *motor) guardarFicha(mi *metainfo.MetaInfo) (string, error) {
 		return "", err
 	}
 	return hash, f.Close()
+}
+
+// trechosBaixados: as partes do arquivo (em frações de 0 a 1) que o motor já tem, para a barra de
+// carregado do controle (S46). Desligado ou sem o torrent aberto, nada.
+func (m *motor) trechosBaixados(hash string, indice int) [][2]float64 {
+	m.mu.Lock()
+	cl := m.cl
+	m.mu.Unlock()
+	var h metainfo.Hash
+	if cl == nil || h.FromHexString(hash) != nil {
+		return nil
+	}
+	t, ok := cl.Torrent(h)
+	if !ok || t.Info() == nil || indice >= len(t.Files()) {
+		return nil
+	}
+	f := t.Files()[indice]
+	tamanhoDoPedaco := t.Info().PieceLength
+	if f.Length() <= 0 || tamanhoDoPedaco <= 0 {
+		return nil
+	}
+	var out [][2]float64
+	primeiro, ultimo := f.Offset()/tamanhoDoPedaco, (f.Offset()+f.Length()-1)/tamanhoDoPedaco
+	for p := primeiro; p <= ultimo; p++ {
+		if !t.PieceState(int(p)).Complete {
+			continue
+		}
+		ini := math.Max(0, float64(p*tamanhoDoPedaco-f.Offset())/float64(f.Length()))
+		fim := math.Min(1, float64((p+1)*tamanhoDoPedaco-f.Offset())/float64(f.Length()))
+		if n := len(out); n > 0 && ini-out[n-1][1] < 1e-9 {
+			out[n-1][1] = fim
+		} else {
+			out = append(out, [2]float64{ini, fim})
+		}
+	}
+	return out
 }

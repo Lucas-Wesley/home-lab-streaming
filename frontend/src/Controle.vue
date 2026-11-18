@@ -6,6 +6,7 @@ import Icone from './Icone.vue'
 import LegendaAoVivo from './LegendaAoVivo.vue'
 import { api } from './api.js'
 import { esperarAjuste } from './legendas.js'
+import { fundoDaBarra } from './duplas.js'
 import { carregarTelas, comandar, telas, tocarNaTela } from './telas.js'
 import { relogio, rotaDoPlayer } from './tempo.js'
 import { voltar } from './voltar.js'
@@ -25,6 +26,9 @@ const sessao = computed(() => estado.value?.sessao)
 const aoVivo = computed(() => sessao.value?.ao_vivo)
 const posicao = computed(() => arrastando.value ?? estado.value?.posicao ?? 0)
 const parada = computed(() => !sessao.value && ['STOPPED', 'NO_MEDIA_PRESENT'].includes(estado.value?.estado))
+// A barra mostra, mais clara, a parte que a tela já pode tocar sem esperar (S46): o que a legenda
+// dupla já gravou, ou o que o torrent já baixou.
+const fundo = computed(() => fundoDaBarra(posicao.value, estado.value?.duracao, estado.value?.carregado))
 
 // A legenda no celular (S31) precisa do segundo exato. A tela diz a posição com milésimos; o celular
 // guarda em que instante ela foi lida (descontando o tempo da resposta, idade_ms) e anda pelo
@@ -116,7 +120,7 @@ async function reenviar(mensagem) {
   if (!s || !tela.value) return
   ocupado.value = true
   try {
-    await tocarNaTela(tela.value, s.chave, { posicao: estado.value?.posicao || 0, capa: s.capa })
+    await tocarNaTela(tela.value, s.chave, { posicao: estado.value?.posicao || 0, capa: s.capa, dupla: !!s.dupla })
     versaoDaLegenda.value++
     recado(mensagem)
     await lerEstado()
@@ -192,7 +196,11 @@ async function sincronizarLegenda() {
 function assistirAqui() {
   const s = sessao.value
   if (!s) return
-  location.hash = rotaDoPlayer(s.chave, { titulo: s.titulo, posicao: s.ao_vivo ? 0 : estado.value?.posicao || 0 })
+  if (s.crescendo) {
+    recado('A legenda dupla ainda está gravando: no celular, só depois de pronta.', true)
+    return
+  }
+  location.hash = rotaDoPlayer(s.chave, { titulo: s.titulo, posicao: s.ao_vivo ? 0 : estado.value?.posicao || 0, dupla: !!s.dupla })
 }
 
 onMounted(() => {
@@ -249,6 +257,7 @@ onBeforeUnmount(() => {
           min="0"
           :max="Math.floor(estado.duracao)"
           :value="Math.floor(posicao)"
+          :style="{ background: fundo }"
           aria-label="Posição no vídeo"
           @input="arrastando = Number($event.target.value)"
           @change="soltarBarra"
@@ -376,9 +385,32 @@ h1 {
   margin: 8px 0 6px;
 }
 
+/* A trilha é desenhada aqui: o já visto na cor da marca, o carregado mais claro, o resto apagado. */
 input[type='range'] {
   width: 100%;
-  accent-color: var(--marca);
+  height: 6px;
+  margin: 10px 0;
+  border-radius: 3px;
+  appearance: none;
+  cursor: pointer;
+}
+
+input[type='range']::-webkit-slider-thumb {
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--marca);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 35%);
+  appearance: none;
+}
+
+input[type='range']::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--marca);
 }
 
 .numeros {

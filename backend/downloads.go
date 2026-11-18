@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"math"
 	"net/http"
 	"sync"
 	"time"
@@ -23,6 +25,9 @@ type videoBaixado struct {
 	Baixado   int64   `json:"baixado"`
 	Estado    string  `json:"estado"` // baixando ou baixado
 	Posicao   float64 `json:"posicao,omitempty"`
+	// Legenda dupla (S46): estado da gravação e quanto já foi gravado (0 a 1).
+	Dupla      string  `json:"dupla,omitempty"`
+	DuplaParte float64 `json:"dupla_parte,omitempty"`
 }
 
 func (a *app) handleDownloadsDeTorrent(w http.ResponseWriter, r *http.Request) {
@@ -60,6 +65,12 @@ func (a *app) handleDownloadsDeTorrent(w http.ResponseWriter, r *http.Request) {
 		}
 		if nomeDoTitulo == "" && v.TMDB != "" {
 			semNome[v.Hash] = v.TMDB
+		}
+		if d, err := a.legendaDuplaDe(r.Context(), fmt.Sprintf("arquivo:%d", v.ID)); err == nil {
+			v.Dupla = d.Estado
+			if d.Duracao > 0 {
+				v.DuplaParte = math.Min(1, d.Gravado/d.Duracao)
+			}
 		}
 		lista = append(lista, v)
 	}

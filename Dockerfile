@@ -24,8 +24,9 @@ RUN wget -qO /tmp/tdl.tgz "https://github.com/iyear/tdl/releases/download/v${TDL
 
 # O Node fica na imagem final: o Claude Code roda nele (S27), como no Acervo.
 FROM node:24-alpine
-# ffmpeg: ler duração e formatos dos vídeos e tirar quadros na verificação (S23).
-RUN apk add --no-cache ca-certificates tzdata ffmpeg libgcc libstdc++ \
+# ffmpeg: ler duração e formatos dos vídeos e tirar quadros na verificação (S23). A fonte Liberation
+# Sans (com as medidas da Arial) é a da legenda dupla gravada na imagem (S46).
+RUN apk add --no-cache ca-certificates tzdata ffmpeg libgcc libstdc++ font-liberation fontconfig \
  && npm install -g @anthropic-ai/claude-code \
  && npm cache clean --force \
  && mkdir /data && chown 1000:1000 /data

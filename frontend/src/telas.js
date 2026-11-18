@@ -21,8 +21,9 @@ export function carregarTelas(forcar = false) {
 }
 
 // Manda o vídeo para a tela; o servidor para o que tocava em outro lugar (uma conexão só).
-export async function tocarNaTela(tela, chave, { posicao = 0, capa = '' } = {}) {
-  return api(`/api/telas/${encodeURIComponent(tela.id)}/tocar`, { metodo: 'POST', corpo: { chave, posicao, capa }, tempo: 20000 })
+// dupla: a versão com a legenda dupla gravada na imagem (S46).
+export async function tocarNaTela(tela, chave, { posicao = 0, capa = '', dupla = false } = {}) {
+  return api(`/api/telas/${encodeURIComponent(tela.id)}/tocar`, { metodo: 'POST', corpo: { chave, posicao, capa, dupla }, tempo: 20000 })
 }
 
 export function comandar(idDaTela, comando, valor = 0) {

@@ -551,6 +551,7 @@ func (a *app) baixar(f arquivoDeTorrent) {
 			// Tira do motor antes de conferir: a biblioteca troca o nome do arquivo parcial no fim.
 			t.Drop()
 			a.db.Exec(`UPDATE torrent_arquivos SET download = 'baixado' WHERE id = ?`, f.ID)
+			a.acordarDuplas() // a legenda dupla pedida junto com o download (S46)
 			if f, tg, err := a.arquivo(context.Background(), f.ID); err == nil {
 				a.avisos.avisar(aviso{Titulo: tituloDoArquivo(f, tg), Texto: "Baixado: pronto para assistir.", Link: a.cfg.link + "/#/torrent/" + f.Hash})
 			}
@@ -735,6 +736,18 @@ func (a *app) handleApagarTorrent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.motor.soltarTorrent(hash)
+	if rows, err := a.db.QueryContext(r.Context(), `SELECT id FROM torrent_arquivos WHERE hash = ?`, hash); err == nil {
+		var ids []int64
+		for rows.Next() {
+			var id int64
+			rows.Scan(&id)
+			ids = append(ids, id)
+		}
+		rows.Close()
+		for _, id := range ids {
+			a.apagarLegendaDupla(r.Context(), fmt.Sprintf("arquivo:%d", id))
+		}
+	}
 	a.downloads.mu.Lock()
 	for id, cancel := range a.downloads.cancelar {
 		if f, _, err := a.arquivo(r.Context(), id); err == nil && f.Hash == hash {
@@ -845,6 +858,7 @@ func (a *app) handleVisto(w http.ResponseWriter, r *http.Request) {
 
 // apagarArquivo tira do disco o que foi baixado de um vídeo.
 func (a *app) apagarArquivo(ctx context.Context, f arquivoDeTorrent) error {
+	a.apagarLegendaDupla(ctx, fmt.Sprintf("arquivo:%d", f.ID)) // a versão com a legenda dupla vai junto (S46)
 	if err := a.apagarDados(f); err != nil {
 		return err
 	}

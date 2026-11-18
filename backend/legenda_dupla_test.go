@@ -189,3 +189,12 @@ func TestPedirLegendaDupla(t *testing.T) {
 		t.Errorf("depois de apagar: %+v", d)
 	}
 }
+
+// Depois de reiniciar no meio, grava só o que falta.
+func TestFaltandoNaDupla(t *testing.T) {
+	gravados := []trechoGravado{{inicio: 3360, fim: 3900}, {inicio: 4200, fim: 4500}}
+	got := fmt.Sprint(faltando([2]float64{3360, 6427}, gravados), faltando([2]float64{0, 3360}, gravados), faltando([2]float64{3360, 3900.3}, gravados))
+	if got != "[[3900 4200] [4500 6427]] [[0 3360]] []" {
+		t.Errorf("faltando: %s", got)
+	}
+}

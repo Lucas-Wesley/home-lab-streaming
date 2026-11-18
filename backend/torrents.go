@@ -49,6 +49,7 @@ type torrentGuardado struct {
 	Baixados     int    `json:"baixados"`
 	Baixando     int    `json:"baixando"`
 	Tamanho      int64  `json:"tamanho"`
+	NomeDoTitulo string `json:"nome_do_titulo,omitempty"` // do TMDB (S45): "O Convite"
 }
 
 type arquivoDeTorrent struct {
@@ -377,7 +378,7 @@ func (a *app) buscarJSONPublico(ctx context.Context, endereco string, destino an
 // ---------- Consultas ----------
 
 func (a *app) listaDeTorrents(ctx context.Context, hash string) ([]torrentGuardado, error) {
-	consulta := `SELECT t.hash, t.titulo, t.origem, t.referencia, t.capa, t.sinopse, t.ano, t.tem_ficha, t.erro, t.adicionado_em,
+	consulta := `SELECT t.hash, t.titulo, t.origem, t.referencia, t.capa, t.sinopse, t.ano, t.tem_ficha, t.erro, t.adicionado_em, t.nome_do_titulo,
 			COUNT(f.id) FILTER (WHERE f.tipo = 'video'),
 			COUNT(f.id) FILTER (WHERE f.tipo = 'video' AND f.download = 'baixado'),
 			COUNT(f.id) FILTER (WHERE f.tipo = 'video' AND f.download = 'baixando'),
@@ -398,7 +399,7 @@ func (a *app) listaDeTorrents(ctx context.Context, hash string) ([]torrentGuarda
 	lista := []torrentGuardado{}
 	for rows.Next() {
 		var t torrentGuardado
-		if err := rows.Scan(&t.Hash, &t.Titulo, &t.Origem, &t.Referencia, &t.Capa, &t.Sinopse, &t.Ano, &t.TemFicha, &t.Erro, &t.AdicionadoEm,
+		if err := rows.Scan(&t.Hash, &t.Titulo, &t.Origem, &t.Referencia, &t.Capa, &t.Sinopse, &t.Ano, &t.TemFicha, &t.Erro, &t.AdicionadoEm, &t.NomeDoTitulo,
 			&t.Videos, &t.Baixados, &t.Baixando, &t.Tamanho); err != nil {
 			return nil, err
 		}
@@ -453,9 +454,13 @@ func (a *app) arquivo(ctx context.Context, id int64) (arquivoDeTorrent, torrentG
 }
 
 // tituloDoArquivo: o título do torrent, mais o episódio quando é série.
+// Com o nome do TMDB (S45), ele vale no lugar do nome do torrent: a tela mostra "O Convite".
 func tituloDoArquivo(f arquivoDeTorrent, t torrentGuardado) string {
 	if f.Episodio > 0 {
-		return fmt.Sprintf("%s T%d E%d", primeiro(nomeDoTorrent(t.Titulo), t.Titulo), f.Temporada, f.Episodio)
+		return fmt.Sprintf("%s T%d E%d", primeiro(t.NomeDoTitulo, nomeDoTorrent(t.Titulo), t.Titulo), f.Temporada, f.Episodio)
+	}
+	if t.NomeDoTitulo != "" && t.Videos <= 1 {
+		return t.NomeDoTitulo
 	}
 	videos := t.Videos
 	if videos > 1 {

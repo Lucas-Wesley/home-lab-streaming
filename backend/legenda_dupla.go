@@ -126,16 +126,20 @@ type trechoGravado struct {
 	inicio, fim float64
 }
 
-// trechosDaDupla lê as listas do ffmpeg (a: do ponto pedido ao fim; b: do começo ao ponto), em ordem.
-// O ffmpeg marca o começo do primeiro pedaço como 0: vale o ponto de onde a gravação partiu.
+// trechosDaDupla lê as listas do ffmpeg (uma por gravação: a, do ponto pedido ao fim; b, do começo
+// ao ponto; p01, p02…, o que faltou depois de reiniciar), em ordem de tempo. O ffmpeg marca o começo
+// do primeiro pedaço como 0: vale o ponto de onde aquela gravação partiu (guardado em <nome>.inicio).
 func (a *app) trechosDaDupla(chave string, comeco float64) []trechoGravado {
 	pasta := a.pastaDaDupla(chave)
 	var todos []trechoGravado
-	for _, lista := range []struct {
-		nome   string
-		inicio float64
-	}{{"a", comeco}, {"b", 0}} {
-		b, err := os.ReadFile(filepath.Join(pasta, lista.nome+".csv"))
+	listas, _ := filepath.Glob(filepath.Join(pasta, "*.csv"))
+	for _, caminho := range listas {
+		nome := strings.TrimSuffix(filepath.Base(caminho), ".csv")
+		inicio := map[string]float64{"a": comeco}[nome]
+		if t, err := os.ReadFile(filepath.Join(pasta, nome+".inicio")); err == nil {
+			inicio, _ = strconv.ParseFloat(strings.TrimSpace(string(t)), 64)
+		}
+		b, err := os.ReadFile(caminho)
 		if err != nil {
 			continue
 		}
@@ -147,7 +151,7 @@ func (a *app) trechosDaDupla(chave string, comeco float64) []trechoGravado {
 			ini, _ := strconv.ParseFloat(partes[1], 64)
 			fim, _ := strconv.ParseFloat(partes[2], 64)
 			if i == 0 {
-				ini = lista.inicio
+				ini = inicio
 			}
 			todos = append(todos, trechoGravado{filepath.Join(pasta, partes[0]), ini, fim})
 		}
@@ -371,12 +375,73 @@ func (a *app) gravarDupla(ctx context.Context, chave string) error {
 		a.db.Exec(`UPDATE legendas_duplas SET estado = ?, mensagem = ? WHERE chave = ?`, e, msg, chave)
 	}
 
-	estado("sincronizando", "Escolhendo e sincronizando as legendas em inglês e português…")
 	duracao := a.duracaoDoArquivo(ctx, f)
 	if duracao <= 0 {
 		return errors.New("não consegui ler a duração do vídeo")
 	}
 	a.db.Exec(`UPDATE legendas_duplas SET duracao = ? WHERE chave = ?`, duracao, chave)
+	pasta := a.pastaDaDupla(chave)
+	comeco := math.Min(d.Comeco, math.Max(0, duracao-pedacoDaDupla))
+	// Reiniciou no meio da gravação (um deploy): as legendas já estão no ASS e os pedaços gravados
+	// ficam; grava só o que falta.
+	if _, err := os.Stat(filepath.Join(pasta, "dupla.ass")); err != nil || comeco != d.Comeco {
+		if err := a.sincronizarDupla(ctx, chave, f, pasta); err != nil {
+			return err
+		}
+	}
+
+	estado("gravando", "")
+	faixa := faixaEmIngles(a, f)
+	a.db.Exec(`UPDATE legendas_duplas SET comeco = ? WHERE chave = ?`, comeco, chave)
+	partes := [][2]float64{{comeco, duracao}}
+	if comeco > 0 {
+		partes = append(partes, [2]float64{0, comeco})
+	}
+	for _, parte := range partes {
+		for _, falta := range faltando(parte, juntarTrechos(a.trechosDaDupla(chave, comeco))) {
+			listas, _ := filepath.Glob(filepath.Join(pasta, "*.csv"))
+			ate := falta[1]
+			if ate >= duracao-0.5 {
+				ate = 0 // até o fim
+			}
+			if err := gravarTrecho(ctx, pasta, entrada, fmt.Sprintf("p%02d", len(listas)+1), falta[0], ate, faixa); err != nil {
+				return err
+			}
+		}
+	}
+
+	estado("juntando", "")
+	if err := a.juntarDupla(ctx, chave, comeco); err != nil {
+		return err
+	}
+	a.db.Exec(`UPDATE legendas_duplas SET estado = 'pronta', mensagem = '', pronta_em = ? WHERE chave = ?`, a.agoraEmTexto(), chave)
+	a.limparPedacos(chave)
+	a.avisos.avisar(aviso{Titulo: tituloDoArquivo(f, t), Texto: "Legenda dupla pronta: inglês e português na imagem.", Link: a.cfg.link + "/#/torrents"})
+	return nil
+}
+
+// faltando: as partes de [de, ate) que nenhum trecho gravado cobre (menos de meio segundo não conta).
+func faltando(intervalo [2]float64, gravados []trechoGravado) [][2]float64 {
+	var out [][2]float64
+	cursor := intervalo[0]
+	for _, g := range gravados {
+		if g.fim <= cursor || g.inicio >= intervalo[1] {
+			continue
+		}
+		if g.inicio-cursor > 0.5 {
+			out = append(out, [2]float64{cursor, g.inicio})
+		}
+		cursor = math.Max(cursor, g.fim)
+	}
+	if intervalo[1]-cursor > 0.5 {
+		out = append(out, [2]float64{cursor, intervalo[1]})
+	}
+	return out
+}
+
+// sincronizarDupla escolhe e sincroniza as legendas e escreve o ASS numa pasta nova.
+func (a *app) sincronizarDupla(ctx context.Context, chave string, f arquivoDeTorrent, pasta string) error {
+	a.db.Exec(`UPDATE legendas_duplas SET estado = 'sincronizando', mensagem = ? WHERE chave = ?`, "Escolhendo e sincronizando as legendas em inglês e português…", chave)
 	en, pt, err := a.legendasDaDupla(ctx, chave, f)
 	if err != nil {
 		return err
@@ -389,36 +454,11 @@ func (a *app) gravarDupla(ctx context.Context, chave string) error {
 			escala = excluded.escala, ajuste = excluded.ajuste, alinhando = 0`,
 		chave, en.id, en.nome, en.al.Atraso, en.al.Escala, en.ajuste)
 
-	pasta := a.pastaDaDupla(chave)
 	os.RemoveAll(pasta)
 	if err := os.MkdirAll(pasta, 0o755); err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(pasta, "dupla.ass"), []byte(assDaDupla(en, pt)), 0o644); err != nil {
-		return err
-	}
-
-	estado("gravando", "")
-	faixa := faixaEmIngles(a, f)
-	comeco := math.Min(d.Comeco, math.Max(0, duracao-pedacoDaDupla))
-	a.db.Exec(`UPDATE legendas_duplas SET comeco = ? WHERE chave = ?`, comeco, chave)
-	if err := gravarTrecho(ctx, pasta, entrada, "a", comeco, 0, faixa); err != nil {
-		return err
-	}
-	if comeco > 0 {
-		if err := gravarTrecho(ctx, pasta, entrada, "b", 0, comeco, faixa); err != nil {
-			return err
-		}
-	}
-
-	estado("juntando", "")
-	if err := a.juntarDupla(ctx, chave, comeco); err != nil {
-		return err
-	}
-	a.db.Exec(`UPDATE legendas_duplas SET estado = 'pronta', mensagem = '', pronta_em = ? WHERE chave = ?`, a.agoraEmTexto(), chave)
-	a.limparPedacos(chave)
-	a.avisos.avisar(aviso{Titulo: tituloDoArquivo(f, t), Texto: "Legenda dupla pronta: inglês e português na imagem.", Link: a.cfg.link + "/#/torrents"})
-	return nil
+	return os.WriteFile(filepath.Join(pasta, "dupla.ass"), []byte(assDaDupla(en, pt)), 0o644)
 }
 
 // faixaEmIngles: a faixa de áudio em inglês, se o arquivo disser; senão, a primeira.
@@ -440,6 +480,9 @@ func faixaEmIngles(a *app, f arquivoDeTorrent) int {
 // tempos ficam os do vídeo de origem (-copyts): a legenda cai no lugar e os pedaços de antes e de
 // depois do ponto pedido se encaixam.
 func gravarTrecho(ctx context.Context, pasta, entrada, nome string, de, ate float64, faixa int) error {
+	if err := os.WriteFile(filepath.Join(pasta, nome+".inicio"), []byte(strconv.FormatFloat(de, 'f', 3, 64)), 0o644); err != nil {
+		return err
+	}
 	args := []string{"-hide_banner", "-nostdin", "-v", "error"}
 	if de > 0 {
 		args = append(args, "-ss", strconv.FormatFloat(de, 'f', 3, 64))

@@ -28,8 +28,8 @@ func TestASSDaDupla(t *testing.T) {
 	}
 	want := []string{
 		"Dialogue: 0,0:00:11.00,0:00:13.00,PT,,0,0,0,,Vou para casa.",
-		"Dialogue: 0,0:00:11.50,0:00:13.50,EN,,0,0,0,,I'm going home now.",
-		`Dialogue: 0,0:00:14.50,0:00:15.50,EN,,0,0,0,,-No!\N-"No"?`,
+		"Dialogue: 1,0:00:11.50,0:00:13.50,EN,,0,0,108,,I'm going home now.", // acima da linha do português
+		`Dialogue: 1,0:00:14.50,0:00:15.50,EN,,0,0,46,,-No!\N-"No"?`,         // sem português junto: embaixo
 	}
 	if strings.Join(eventos, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("eventos:\n%s", strings.Join(eventos, "\n"))

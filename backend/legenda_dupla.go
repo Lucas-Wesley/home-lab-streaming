@@ -616,25 +616,53 @@ func tempoDoASS(t float64) string {
 	return fmt.Sprintf("%d:%02d:%02d.%02d", cs/360000, cs/6000%60, cs/100%60, cs%100)
 }
 
-// assDaDupla: o modelo aprovado pelo Lucas. O português vem antes no arquivo: o libass empilha as
-// falas na ordem, e a de depois (o inglês) sobe por cima da de antes.
+// Posição das linhas (em pixels de 1080): o português fica embaixo; o inglês, logo acima dele.
+const (
+	margemDeBaixo     = 46
+	alturaDaLinhaPT   = 58 // fonte 46 com contorno
+	letrasPorLinhaPT  = 72 // cabem numa linha de 1760 px, na fonte 46
+	folgaEntreLinguas = 4
+)
+
+// linhasNaTela: quantas linhas a fala ocupa (as quebradas pela largura também).
+func linhasNaTela(texto string, porLinha int) int {
+	n := 0
+	for _, parte := range strings.Split(texto, `\N`) {
+		n += max(1, (len([]rune(parte))+porLinha-1)/porLinha)
+	}
+	return n
+}
+
+// assDaDupla: o modelo aprovado pelo Lucas (inglês branco em negrito, português menor e amarelo logo
+// abaixo). Sem depender do empilhamento automático do libass (que muda com a ordem e o tempo das
+// falas): o português fica fixo embaixo, numa camada; o inglês, noutra, sobe o tanto de linhas do
+// português que aparece junto com ele (pelo menos uma, para não pular de altura).
 func assDaDupla(en, pt legendaDaDupla) string {
 	var b strings.Builder
 	b.WriteString("[Script Info]\nScriptType: v4.00+\nPlayResX: 1920\nPlayResY: 1080\nScaledBorderAndShadow: yes\nWrapStyle: 0\n\n")
 	b.WriteString("[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n")
-	b.WriteString("Style: EN,Liberation Sans,60,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,3,0,2,80,80,46,1\n")
-	b.WriteString("Style: PT,Liberation Sans,46,&H0060E0FF,&H000000FF,&H00000000,&H64000000,0,0,0,0,100,100,0,0,1,2.5,0,2,80,80,46,1\n\n")
+	fmt.Fprintf(&b, "Style: EN,Liberation Sans,60,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,3,0,2,80,80,%d,1\n", margemDeBaixo)
+	fmt.Fprintf(&b, "Style: PT,Liberation Sans,46,&H0060E0FF,&H000000FF,&H00000000,&H64000000,0,0,0,0,100,100,0,0,1,2.5,0,2,80,80,%d,1\n\n", margemDeBaixo)
 	b.WriteString("[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n")
-	for _, l := range []struct {
-		estilo string
-		falas  []falaComTexto
-	}{{"PT", falasDoSRT(pt.texto, pt.al)}, {"EN", falasDoSRT(en.texto, en.al)}} {
-		for _, f := range l.falas {
-			if f.fim <= 0 {
-				continue
-			}
-			fmt.Fprintf(&b, "Dialogue: 0,%s,%s,%s,,0,0,0,,%s\n", tempoDoASS(f.inicio), tempoDoASS(f.fim), l.estilo, f.texto)
+	falasPT, falasEN := falasDoSRT(pt.texto, pt.al), falasDoSRT(en.texto, en.al)
+	for _, f := range falasPT {
+		if f.fim > 0 {
+			fmt.Fprintf(&b, "Dialogue: 0,%s,%s,PT,,0,0,0,,%s\n", tempoDoASS(f.inicio), tempoDoASS(f.fim), f.texto)
 		}
+	}
+	for _, f := range falasEN {
+		if f.fim <= 0 {
+			continue
+		}
+		linhas := 0
+		for _, p := range falasPT {
+			if p.inicio < f.fim && p.fim > f.inicio {
+				linhas = max(linhas, linhasNaTela(p.texto, letrasPorLinhaPT))
+			}
+		}
+		// Sempre o espaço de uma linha de português, para o inglês não pular de altura entre as falas.
+		margem := margemDeBaixo + max(1, linhas)*alturaDaLinhaPT + folgaEntreLinguas
+		fmt.Fprintf(&b, "Dialogue: 1,%s,%s,EN,,0,0,%d,,%s\n", tempoDoASS(f.inicio), tempoDoASS(f.fim), margem, f.texto)
 	}
 	return b.String()
 }

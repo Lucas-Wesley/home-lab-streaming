@@ -54,7 +54,7 @@ const videos = computed(() => {
   const torrent = (deTorrent.value || []).map((v) => ({
     chave: `arquivo:${v.id}`, titulo: v.titulo + episodio(v), capa: v.capa, origem: 'Torrent', detalhe: v.torrent !== v.titulo ? v.torrent : '',
     tamanho: v.tamanho, baixado: v.baixado, estado: v.estado, pagina: v.tmdb ? `#/titulo/${v.tmdb}` : '',
-    dupla: v.dupla || '', duplaParte: v.dupla_parte || 0,
+    dupla: v.dupla || '', duplaParte: v.dupla_parte || 0, posicao: v.posicao || 0,
     apagar: () => api(`/api/arquivos/${v.id}/baixar`, { metodo: 'DELETE' }),
   }))
   return [...assinatura, ...torrent].sort((a, b) => (a.estado === 'baixado') - (b.estado === 'baixado'))
@@ -232,7 +232,7 @@ onBeforeUnmount(() => clearInterval(relogio))
     </section>
 
     <Folha v-if="assistindo" :titulo="assistindo.titulo" @fechar="assistindo = null">
-      <Assistir :chave="assistindo.chave" :titulo="assistindo.titulo" :capa="assistindo.capa" @escolheu="assistindo = null" />
+      <Assistir :chave="assistindo.chave" :titulo="assistindo.titulo" :capa="assistindo.capa" :posicao="assistindo.posicao || 0" @escolheu="assistindo = null" />
     </Folha>
 
     <Folha v-if="adicionando" titulo="Adicionar link magnet" @fechar="adicionando = false">

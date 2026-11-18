@@ -502,7 +502,7 @@ func gravarTrecho(ctx context.Context, pasta, entrada, nome string, de, ate floa
 		"-c:a", "aac", "-b:a", "192k", "-ac", "2",
 		"-f", "segment", "-segment_time", strconv.FormatFloat(pedacoDaDupla, 'f', 0, 64), "-segment_format", "mpegts",
 		"-segment_list", nome+".csv", "-segment_list_type", "csv", nome+"_%05d.ts")
-	cmd := exec.CommandContext(ctx, programaFFmpeg, args...)
+	cmd := comPrioridadeBaixa(ctx, programaFFmpeg, args...)
 	cmd.Dir = pasta
 	if saida, err := cmd.CombinedOutput(); err != nil {
 		if ctx.Err() != nil {
@@ -511,6 +511,15 @@ func gravarTrecho(ctx context.Context, pasta, entrada, nome string, de, ate floa
 		return fmt.Errorf("o ffmpeg falhou ao gravar: %s", ultimasLinhas(string(saida), 3))
 	}
 	return nil
+}
+
+// comPrioridadeBaixa: a gravação ocupa o processador inteiro por quase uma hora; com nice, os outros
+// apps do servidor (e o vídeo que a tela recebe) passam na frente.
+func comPrioridadeBaixa(ctx context.Context, programa string, args ...string) *exec.Cmd {
+	if nice, err := exec.LookPath("nice"); err == nil {
+		return exec.CommandContext(ctx, nice, append([]string{"-n", "10", programa}, args...)...)
+	}
+	return exec.CommandContext(ctx, programa, args...)
 }
 
 func ultimasLinhas(s string, n int) string {

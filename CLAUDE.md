@@ -3,7 +3,7 @@
 App do **ecossistema de apps pessoais do Lucas**: central de streaming (canais, filmes e séries de uma assinatura
 IPTV) com o celular como controle remoto da TV e do projetor.
 
-**Comece lendo:** [`docs/DECISOES.md`](docs/DECISOES.md) — estado atual, decisões (S1–S45) e próximos passos.
+**Comece lendo:** [`docs/DECISOES.md`](docs/DECISOES.md) — estado atual, decisões (S1–S46) e próximos passos.
 
 ## Em uma frase
 O servidor guarda o acesso e o catálogo, repassa o vídeo do provedor (para o PWA em `/api/video`, para as telas em
@@ -53,6 +53,9 @@ Mesma infraestrutura e mesmo design system (`docs/DESIGN-SYSTEM.md`) das outras 
   nunca no Git). Nos testes, só `testdata/tdl-falso` (`TDL_BIN`; `novoAmbiente` aponta para um tdl que não existe).
   Um tdl por vez: a sessão é um banco que só um processo abre. A **Trilha** toca esses vídeos direto pela
   `GET /api/video/proprio/<id>.mp4` (videoaula, T30 de lá): mudar essa rota é mudar a Trilha também.
+- **Legenda dupla** (S46, `legenda_dupla.go`): uma gravação por vez, com `nice`. Nos testes, o ffmpeg do Mac não tem
+  libass: `queimarLegenda = false` (o vídeo sai sem a legenda). A fonte da imagem é Liberation Sans (`font-liberation`
+  no Dockerfile).
 - **Títulos para verificar** (S37): o Lucas manda títulos estranhos pelo menu ⋯ da página do título. Quando ele
   pedir para "verificar os títulos reportados", seguir [`docs/PARA-VERIFICAR.md`](docs/PARA-VERIFICAR.md).
 - **Commits:** autoria do Lucas; **sem linha `Co-Authored-By`**.

@@ -37,10 +37,30 @@ type respostaDoClaude struct {
 // perguntarAoClaude manda o pedido e lê a resposta no formato do esquema (JSON Schema). pastaDeLeitura,
 // se houver, é a única que ele pode ler (para as imagens).
 func (a *app) perguntarAoClaude(ctx context.Context, pedido, esquema, pastaDeLeitura string, destino any) error {
+	return a.consultarClaude(ctx, pedido, esquema, pastaDeLeitura, modeloDoClaude(), false, destino)
+}
+
+// Pesquisa na web (S47, "Buscar mais informações"): o Sonnet, que em teste foi mais rápido (24 s ×
+// 35 s), achou mais fontes e mais detalhes que o Haiku. É um botão, de vez em quando.
+func modeloDaPesquisa() string { return env("CLAUDE_MODELO_PESQUISA", "sonnet") }
+
+// pesquisarComClaude: o Claude pode buscar e ler páginas na web (e nada mais).
+func (a *app) pesquisarComClaude(ctx context.Context, pedido, esquema string, destino any) error {
+	return a.consultarClaude(ctx, pedido, esquema, "", modeloDaPesquisa(), true, destino)
+}
+
+func (a *app) consultarClaude(ctx context.Context, pedido, esquema, pastaDeLeitura, modelo string, web bool, destino any) error {
 	if !claudeDisponivel() {
 		return errors.New("Claude Code não instalado neste servidor")
 	}
-	args := []string{"-p", pedido, "--output-format", "json", "--model", modeloDoClaude(), "--disallowedTools", ferramentasNegadas}
+	negadas := ferramentasNegadas
+	if web {
+		negadas = "Bash,Write,Edit,Task,NotebookEdit,Glob,Grep,Read"
+	}
+	args := []string{"-p", pedido, "--output-format", "json", "--model", modelo, "--disallowedTools", negadas}
+	if web {
+		args = append(args, "--allowedTools", "WebSearch,WebFetch")
+	}
 	if esquema != "" {
 		args = append(args, "--json-schema", esquema)
 	}

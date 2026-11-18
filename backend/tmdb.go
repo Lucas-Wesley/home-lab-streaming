@@ -141,20 +141,22 @@ func (a *app) handleApagarTMDB(w http.ResponseWriter, r *http.Request) {
 // ---------- Busca de títulos ----------
 
 type tituloDoTMDB struct {
-	Tipo       string            `json:"tipo"` // filme ou serie
-	ID         int               `json:"id"`
-	Titulo     string            `json:"titulo"`
-	Original   string            `json:"original,omitempty"`
-	Ano        string            `json:"ano,omitempty"`
-	Capa       string            `json:"capa,omitempty"`
-	Fundo      string            `json:"fundo,omitempty"`
-	Sinopse    string            `json:"sinopse,omitempty"`
-	Nota       float64           `json:"nota,omitempty"`
-	Generos    []string          `json:"generos,omitempty"`
-	Duracao    int               `json:"duracao,omitempty"` // minutos (filme)
-	Idioma     string            `json:"idioma,omitempty"`  // o idioma original (en, pt, fr…)
-	Temporadas []temporadaDoTMDB `json:"temporadas,omitempty"`
-	ImdbID     string            `json:"imdb_id,omitempty"`
+	Tipo     string `json:"tipo"` // filme ou serie
+	ID       int    `json:"id"`
+	Titulo   string `json:"titulo"`
+	Original string `json:"original,omitempty"`
+	Ano      string `json:"ano,omitempty"`
+	Capa     string `json:"capa,omitempty"`
+	Fundo    string `json:"fundo,omitempty"`
+	Sinopse  string `json:"sinopse,omitempty"`
+	// SinopseIdioma: a sinopse veio de outra tradução (pt-PT, en-US…), sem a do Brasil (S47).
+	SinopseIdioma string            `json:"sinopse_idioma,omitempty"`
+	Nota          float64           `json:"nota,omitempty"`
+	Generos       []string          `json:"generos,omitempty"`
+	Duracao       int               `json:"duracao,omitempty"` // minutos (filme)
+	Idioma        string            `json:"idioma,omitempty"`  // o idioma original (en, pt, fr…)
+	Temporadas    []temporadaDoTMDB `json:"temporadas,omitempty"`
+	ImdbID        string            `json:"imdb_id,omitempty"`
 	// Filme: quando saiu (ou sai) em digital ou disco, a primeira data em qualquer país. Antes
 	// dela, um "WEB-DL" ou "BluRay" do filme é falso ou é outro filme (S23).
 	DigitalEm  string   `json:"digital_em,omitempty"`
@@ -292,9 +294,11 @@ func (a *app) tituloCompleto(ctx context.Context, chave, tipo string, id int) (t
 		Translations struct {
 			Translations []struct {
 				ISO  string `json:"iso_639_1"`
+				Pais string `json:"iso_3166_1"`
 				Data struct {
-					Title string `json:"title"`
-					Name  string `json:"name"`
+					Title    string `json:"title"`
+					Name     string `json:"name"`
+					Overview string `json:"overview"`
 				} `json:"data"`
 			} `json:"translations"`
 		} `json:"translations"`
@@ -318,6 +322,19 @@ func (a *app) tituloCompleto(ctx context.Context, chave, tipo string, id int) (t
 	}
 	for _, g := range d.Genres {
 		t.Generos = append(t.Generos, g.Name)
+	}
+	// Sem sinopse em português do Brasil (S47): a de Portugal, a em inglês ou a do idioma original.
+	if strings.TrimSpace(t.Sinopse) == "" {
+		for _, quer := range [][2]string{{"pt", "BR"}, {"pt", ""}, {"en", ""}, {d.OriginalLang, ""}} {
+			for _, tr := range d.Translations.Translations {
+				if tr.ISO == quer[0] && (quer[1] == "" || tr.Pais == quer[1]) && strings.TrimSpace(tr.Data.Overview) != "" && t.Sinopse == "" {
+					t.Sinopse = strings.TrimSpace(tr.Data.Overview)
+					if tr.ISO != "pt" || tr.Pais != "BR" {
+						t.SinopseIdioma = tr.ISO + "-" + tr.Pais
+					}
+				}
+			}
+		}
 	}
 	for _, s := range d.Seasons {
 		t.Temporadas = append(t.Temporadas, temporadaDoTMDB{Numero: s.SeasonNumber, Nome: s.Name, Episodios: s.EpisodeCount, Ano: reAno.FindString(s.AirDate)})

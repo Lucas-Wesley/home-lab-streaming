@@ -387,6 +387,40 @@ function contextoDoRelato() {
   }
 }
 
+// Mais informações (S47): o Claude pesquisa na web (uns 30 s) e a página guarda. Pelo menu ⋯ ou,
+// sem sinopse, pelo link no lugar dela.
+const informacoes = ref(null)
+const podePesquisar = ref(false)
+const pesquisando = ref(false)
+const IDIOMAS_DA_SINOPSE = { 'pt-PT': 'português de Portugal', 'en-US': 'inglês', 'en-GB': 'inglês' }
+const idiomaDaSinopse = computed(() => {
+  const i = titulo.value?.sinopse_idioma
+  return i ? IDIOMAS_DA_SINOPSE[i] || i : ''
+})
+
+async function carregarInformacoes() {
+  try {
+    const r = await api(`/api/titulos/${tipo}/${id}/informacoes`)
+    informacoes.value = r.informacoes || null
+    podePesquisar.value = r.disponivel
+  } catch {
+    // sem as informações extras, a página segue
+  }
+}
+
+async function buscarInformacoes() {
+  menuAberto.value = false
+  pesquisando.value = true
+  try {
+    const r = await api(`/api/titulos/${tipo}/${id}/informacoes`, { metodo: 'POST', tempo: 200000 })
+    informacoes.value = r.informacoes
+  } catch (e) {
+    recado(e.message, true)
+  } finally {
+    pesquisando.value = false
+  }
+}
+
 // Salvar busca (S44): a página do título é a busca dele; volta aqui pelas Buscas salvas do Início.
 async function salvarEstaBusca() {
   menuAberto.value = false
@@ -432,6 +466,7 @@ onMounted(async () => {
     return
   }
   carregarAssinatura()
+  carregarInformacoes()
   if (ehDocumentario.value) carregarAcervo()
   api(`/api/titulos/${tipo}/${id}/onde`, { tempo: 20000 })
     .then((l) => (outrosServicos.value = l))
@@ -456,6 +491,7 @@ onMounted(async () => {
             <button v-if="ehDocumentario && acervo.disponivel" role="menuitem" @click="abrirAcervo">Mandar para o Acervo</button>
             <button role="menuitem" @click="abrirRelato">Mandar para verificação</button>
             <button role="menuitem" @click="salvarEstaBusca">Salvar busca</button>
+            <button v-if="podePesquisar" role="menuitem" :disabled="pesquisando" @click="buscarInformacoes">{{ informacoes ? 'Pesquisar de novo' : 'Buscar mais informações' }}</button>
           </div>
         </template>
       </div>
@@ -476,6 +512,29 @@ onMounted(async () => {
             <BotaoFavorito :tipo="assinatura[0].tipo" :id="assinatura[0].id" />
           </div>
           <p v-if="titulo.sinopse" class="sinopse">{{ titulo.sinopse }}</p>
+          <p v-if="idiomaDaSinopse" class="suave nota-sinopse">Sem sinopse em português do Brasil: esta está em {{ idiomaDaSinopse }}.</p>
+          <p v-if="!titulo.sinopse && !informacoes && podePesquisar && !pesquisando" class="suave nota-sinopse">
+            Sem descrição. <button class="link" type="button" @click="buscarInformacoes">Buscar mais informações</button>
+          </p>
+          <p v-if="pesquisando" class="suave nota-sinopse">Pesquisando na web… (uns 30 s)</p>
+          <section v-if="informacoes" class="mais-informacoes">
+            <p class="rotulo">Mais informações</p>
+            <p v-if="informacoes.resumo" class="sinopse">{{ informacoes.resumo }}</p>
+            <dl v-if="informacoes.ficha?.length" class="ficha">
+              <template v-for="f in informacoes.ficha" :key="f.rotulo">
+                <dt>{{ f.rotulo }}</dt>
+                <dd>{{ f.valor }}</dd>
+              </template>
+            </dl>
+            <ul v-if="informacoes.curiosidades?.length" class="curiosidades">
+              <li v-for="c in informacoes.curiosidades" :key="c">{{ c }}</li>
+            </ul>
+            <p v-if="informacoes.fontes?.length" class="suave fontes">
+              Fontes:
+              <template v-for="(f, i) in informacoes.fontes" :key="f.url"><a :href="f.url" target="_blank" rel="noopener">{{ f.titulo || new URL(f.url).hostname }}</a><template v-if="i < informacoes.fontes.length - 1">, </template></template>
+              · pesquisado pelo Claude
+            </p>
+          </section>
           <div v-if="outrosServicos.length" class="servicos">
             <span class="rotulo-servicos">Também em</span>
             <a v-for="o in outrosServicos" :key="o.servico" class="servico" :href="o.link" target="_blank" rel="noopener" :title="o.direto ? `Abrir no ${o.servico}` : `Ver onde assistir no TMDB`">
@@ -888,6 +947,52 @@ h1 {
   display: inline-flex;
   gap: 5px;
   align-items: center;
+}
+
+.nota-sinopse {
+  margin: -4px 0 10px;
+  font-size: 0.82rem;
+}
+
+.nota-sinopse .link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--marca);
+  font: inherit;
+  cursor: pointer;
+}
+
+.mais-informacoes {
+  margin: 4px 0 14px;
+}
+
+.ficha {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 14px;
+  margin: 8px 0 10px;
+  font-size: 0.88rem;
+}
+
+.ficha dt {
+  color: var(--texto-suave);
+}
+
+.ficha dd {
+  margin: 0;
+}
+
+.curiosidades {
+  margin: 0 0 10px;
+  padding-left: 18px;
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.fontes {
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
 }
 
 .sinopse {

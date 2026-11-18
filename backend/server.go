@@ -115,6 +115,9 @@ func newServer(a *app, web fs.FS, version string) http.Handler {
 	mux.HandleFunc("PUT /api/sugestoes/{id}", a.handleGuardarSugestao)
 	mux.HandleFunc("PATCH /api/sugestoes/{id}", a.handleMarcarSugestao)
 	mux.HandleFunc("DELETE /api/sugestoes/{id}", a.handleApagarSugestao)
+	mux.HandleFunc("GET /api/buscas-salvas", a.handleBuscasSalvas) // S44
+	mux.HandleFunc("POST /api/buscas-salvas", a.handleSalvarBusca)
+	mux.HandleFunc("DELETE /api/buscas-salvas/{id}", a.handleApagarBuscaSalva)
 	mux.HandleFunc("GET /api/relatos", a.handleRelatos) // títulos para verificar (S37)
 	mux.HandleFunc("PUT /api/relatos/{id}", a.handleGuardarRelato)
 	mux.HandleFunc("PATCH /api/relatos/{id}", a.handleMarcarRelato)

@@ -4,7 +4,9 @@ import Assistir from './Assistir.vue'
 import Folha from './Folha.vue'
 import Grade from './Grade.vue'
 import Icone from './Icone.vue'
+import SalvarBusca from './SalvarBusca.vue'
 import { api } from './api.js'
+import { ONDE, enderecoDaBusca } from './buscasSalvas.js'
 import { relogio } from './tempo.js'
 
 // Início: a busca em tudo (canais, filmes e séries da assinatura e, com o TMDB, os títulos que só há
@@ -20,6 +22,7 @@ const recentes = ref({ filme: [], serie: [] })
 const situacao = ref(null)
 const erro = ref('')
 const escolhido = ref(null) // item de "Continuar assistindo" com a folha aberta
+const salvas = ref([]) // buscas salvas (S44), no pé da página sem busca
 
 // Canais por último: quem busca quase sempre quer um filme ou uma série.
 const GRUPOS = [
@@ -74,6 +77,36 @@ async function tirarDeContinuar(p) {
   }
 }
 
+async function carregarSalvas() {
+  try {
+    salvas.value = await api('/api/buscas-salvas')
+  } catch {
+    salvas.value = []
+  }
+}
+
+async function apagarSalva(b) {
+  salvas.value = salvas.value.filter((x) => x.id !== b.id)
+  try {
+    await api(`/api/buscas-salvas/${b.id}`, { metodo: 'DELETE' })
+  } catch (e) {
+    recado(e.message, true)
+    carregarSalvas()
+  }
+}
+
+// A busca do próprio Início roda aqui mesmo: o endereço muda, mas a página não é refeita.
+function abrirSalva(evento, b) {
+  if (b.onde !== 'inicio') return
+  evento.preventDefault()
+  texto.value = new URLSearchParams(b.endereco.split('?')[1]).get('q') || b.texto
+}
+
+// Sem busca na tela (voltou de uma, ou abriu o Início): a lista pode ter mudado.
+watch(resultado, (r) => {
+  if (!r) carregarSalvas()
+})
+
 async function devolver(p, lugar) {
   try {
     await api(`/api/progresso/${p.chave}`, { metodo: 'PUT', corpo: { posicao: p.posicao, duracao: p.duracao } })
@@ -85,6 +118,7 @@ async function devolver(p, lugar) {
 
 onMounted(async () => {
   if (texto.value.trim()) buscar(texto.value)
+  else carregarSalvas()
   try {
     const [s, c, f, se] = await Promise.all([
       api('/api/acesso'),
@@ -122,6 +156,7 @@ onMounted(async () => {
           <Grade :itens="resultado[g.tipo]" />
         </section>
       </template>
+      <SalvarBusca v-if="!buscando && texto.trim()" :texto="texto" onde="inicio" :endereco="enderecoDaBusca('inicio', texto)" />
     </template>
 
     <template v-else>
@@ -152,6 +187,20 @@ onMounted(async () => {
       <section v-if="recentes.serie.length">
         <p class="rotulo">Séries atualizadas há pouco</p>
         <Grade :itens="recentes.serie" />
+      </section>
+
+      <section v-if="salvas.length" class="salvas">
+        <p class="rotulo">Buscas salvas</p>
+        <ul>
+          <li v-for="b in salvas" :key="b.id">
+            <a :href="b.endereco" @click="abrirSalva($event, b)">
+              <Icone nome="pesquisar" />
+              <span class="texto">{{ b.texto }}</span>
+              <span class="onde">{{ ONDE[b.onde] }}</span>
+            </a>
+            <button class="apagar" :aria-label="`Apagar a busca ${b.texto}`" title="Apagar" @click="apagarSalva(b)"><Icone nome="fechar" /></button>
+          </li>
+        </ul>
       </section>
     </template>
 
@@ -347,6 +396,75 @@ onMounted(async () => {
 }
 
 .tirar:hover {
+  color: var(--perigo);
+}
+
+.salvas ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.salvas li {
+  display: flex;
+  align-items: center;
+  max-width: 100%;
+  border: 1px solid var(--linha);
+  border-radius: 999px;
+  background: var(--superficie);
+}
+
+.salvas a {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  min-height: 36px;
+  padding: 0 4px 0 12px;
+  color: inherit;
+  font-size: 0.88rem;
+  text-decoration: none;
+}
+
+.salvas a:hover .texto {
+  color: var(--marca);
+}
+
+.salvas svg {
+  flex-shrink: 0;
+  width: 15px;
+  height: 15px;
+  color: var(--texto-fraco);
+}
+
+.salvas .texto {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.salvas .onde {
+  flex-shrink: 0;
+  color: var(--texto-fraco);
+  font-size: 0.75rem;
+}
+
+.salvas .apagar {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--texto-fraco);
+  cursor: pointer;
+}
+
+.salvas .apagar:hover {
   color: var(--perigo);
 }
 </style>

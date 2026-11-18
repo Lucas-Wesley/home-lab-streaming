@@ -8,6 +8,7 @@ import OpcaoDaAssinatura from './OpcaoDaAssinatura.vue'
 import OpcaoDeTorrent from './OpcaoDeTorrent.vue'
 import { andando, ehDocumentario as generosDeDocumentario, estadoDoEnvio, lancados } from './acervo.js'
 import { aosPoucos, api, lembrar } from './api.js'
+import { salvarBusca } from './buscasSalvas.js'
 import { tamanho } from './tamanho.js'
 import { ajusteDaVerificacao, carregarVerificacoes, recomendavel, verificacoes, verificar } from './verificacoes.js'
 import { voltar } from './voltar.js'
@@ -386,6 +387,18 @@ function contextoDoRelato() {
   }
 }
 
+// Salvar busca (S44): a página do título é a busca dele; volta aqui pelas Buscas salvas do Início.
+async function salvarEstaBusca() {
+  menuAberto.value = false
+  const t = titulo.value
+  try {
+    await salvarBusca({ texto: t.ano ? `${t.titulo} (${t.ano})` : t.titulo, onde: 'titulo', endereco: `#/titulo/${props.param}` })
+    recado('Busca salva. Ela fica no Início, em “Buscas salvas”.')
+  } catch (e) {
+    recado(e.message, true)
+  }
+}
+
 function abrirRelato() {
   menuAberto.value = false
   relatando.value = true
@@ -442,6 +455,7 @@ onMounted(async () => {
           <div class="menu-opcoes vidro" role="menu">
             <button v-if="ehDocumentario && acervo.disponivel" role="menuitem" @click="abrirAcervo">Mandar para o Acervo</button>
             <button role="menuitem" @click="abrirRelato">Mandar para verificação</button>
+            <button role="menuitem" @click="salvarEstaBusca">Salvar busca</button>
           </div>
         </template>
       </div>

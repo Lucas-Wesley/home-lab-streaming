@@ -3,6 +3,8 @@ import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Assistir from './Assistir.vue'
 import Folha from './Folha.vue'
 import Icone from './Icone.vue'
+import SalvarBusca from './SalvarBusca.vue'
+import { enderecoDaBusca } from './buscasSalvas.js'
 import OpcaoDeTorrent from './OpcaoDeTorrent.vue'
 import { api } from './api.js'
 import { tamanho } from './tamanho.js'
@@ -251,6 +253,7 @@ onBeforeUnmount(() => clearInterval(relogio))
       <ul v-if="resultados?.length" class="lista" :class="{ esmaecida: buscando }">
         <li v-for="r in resultados" :key="r.indexador + r.titulo + r.tamanho"><OpcaoDeTorrent :r="r" mostrar-tipo /></li>
       </ul>
+      <SalvarBusca v-if="!buscando && busca.trim()" :texto="busca" onde="torrents" :endereco="enderecoDaBusca('torrents', busca)" />
     </section>
 
     <Folha v-if="assistindo" :titulo="assistindo.titulo" @fechar="assistindo = null">

@@ -26,7 +26,7 @@ describe('legenda dupla', () => {
   it('desenha o visto e o carregado na barra', () => {
     const f = fundoDaBarra(60, 600, [[0, 120], [300, 420]])
     expect(f).toContain('var(--marca) 10.00%')
-    expect(f).toContain('35%, transparent) 10.00%, color-mix(in srgb, var(--marca) 35%, transparent) 20.00%')
+    expect(f).toContain('45%, var(--linha-forte)) 10.00%, color-mix(in srgb, var(--marca) 45%, var(--linha-forte)) 20.00%')
     expect(f).toContain('var(--linha-forte) 20.00%, var(--linha-forte) 50.00%')
     expect(fundoDaBarra(0, 0, null)).toBe('var(--linha-forte)')
   })

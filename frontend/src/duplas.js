@@ -50,7 +50,7 @@ export function textoDaDupla(d) {
 export function fundoDaBarra(posicao, duracao, carregado) {
   const resto = 'var(--linha-forte)'
   const visto = 'var(--marca)'
-  const claro = 'color-mix(in srgb, var(--marca) 35%, transparent)'
+  const claro = 'color-mix(in srgb, var(--marca) 45%, var(--linha-forte))'
   if (!duracao) return resto
   const pct = (s) => `${Math.max(0, Math.min(100, (s / duracao) * 100)).toFixed(2)}%`
   const partes = [`${visto} 0`, `${visto} ${pct(posicao)}`]

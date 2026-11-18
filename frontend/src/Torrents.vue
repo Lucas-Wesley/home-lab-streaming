@@ -370,6 +370,8 @@ onBeforeUnmount(() => clearInterval(relogio))
 
 .texto {
   display: grid;
+  flex: 1 1 0;
+  grid-template-columns: minmax(0, 1fr);
   align-content: start;
   gap: 4px;
   min-width: 0;

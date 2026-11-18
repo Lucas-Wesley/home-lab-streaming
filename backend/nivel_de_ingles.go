@@ -6,7 +6,6 @@ import (
 	_ "embed"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"math"
 	"net/http"
 	"os"
@@ -358,7 +357,7 @@ func (a *app) handleAnalisarIngles(w http.ResponseWriter, r *http.Request) {
 	pedido := "Abaixo, uma amostra das falas (legenda em inglês) de um filme ou série, em ordem. Avalie a dificuldade do inglês para um brasileiro que estuda inglês e quer assistir com legenda em inglês, treinando o listening.\n" +
 		"Responda em português do Brasil, no formato pedido:\n- nivel_cefr: o nível do quadro europeu necessário para acompanhar (A2, B1, B2, C1 ou C2);\n- dificuldade: fácil, médio ou difícil;\n- nota: 1 (muito fácil) a 10 (muito difícil);\n" +
 		"- motivos: 2 a 4 frases curtas (vocabulário, gírias, ritmo das falas, tipo de linguagem);\n- expressoes: até 10 gírias, expressões idiomáticas ou construções que podem travar quem estuda, com o sentido em português.\n" +
-		fmt.Sprintf("Medidas sem IA, para referência: %.0f palavras por minuto de fala, %.0f%% do tempo com fala, %.1f%% das palavras entre as 5.000 mais comuns.\n", g.Medidas.PorMinuto, g.Medidas.Fala, g.Medidas.Cobertura) +
+		// Sem as medidas no pedido: com elas, o Claude só as repetia (O Convite: B2/6 com, C1/7 sem).
 		"Amostra:\n" + amostraDasFalas(srt)
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
 	defer cancel()

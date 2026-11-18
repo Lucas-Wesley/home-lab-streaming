@@ -119,6 +119,9 @@ func newServer(a *app, web fs.FS, version string) http.Handler {
 	mux.HandleFunc("GET /api/legenda-dupla/{chave}", a.handleLegendaDupla)          // S46
 	mux.HandleFunc("GET /api/titulos/{tipo}/{id}/informacoes", a.handleInformacoes) // S47: pesquisa na web
 	mux.HandleFunc("POST /api/titulos/{tipo}/{id}/informacoes", a.handleBuscarInformacoes)
+	mux.HandleFunc("GET /api/titulos/{tipo}/{id}/ingles", a.handleNivelDeIngles) // S48: nível de inglês
+	mux.HandleFunc("POST /api/titulos/{tipo}/{id}/ingles", a.handleMedirIngles)
+	mux.HandleFunc("POST /api/titulos/{tipo}/{id}/ingles/ia", a.handleAnalisarIngles)
 	mux.HandleFunc("POST /api/legenda-dupla/{chave}", a.handlePedirLegendaDupla)
 	mux.HandleFunc("DELETE /api/legenda-dupla/{chave}", a.handleApagarLegendaDupla)
 	mux.HandleFunc("POST /api/buscas-salvas", a.handleSalvarBusca)

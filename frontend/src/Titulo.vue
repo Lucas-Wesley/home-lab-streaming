@@ -421,6 +421,35 @@ async function buscarInformacoes() {
   }
 }
 
+// Nível de inglês (S48): sem IA, pela legenda em inglês (velocidade, quanto é fala, vocabulário);
+// "Analisar com IA" acrescenta o nível do quadro europeu e as expressões. Medir baixa uma legenda
+// (a cota do OpenSubtitles é diária): por isso é um botão, nos títulos em inglês.
+const ingles = ref(null) // { pode_medir, pode_analisar, nivel }
+const medindo = ref('') // 'medir' ou 'ia'
+const vendoIngles = ref(false)
+const nivel = computed(() => ingles.value?.nivel)
+const mostrarIngles = computed(() => nivel.value || (ingles.value?.pode_medir && titulo.value?.idioma === 'en'))
+
+async function carregarIngles() {
+  try {
+    ingles.value = await api(`/api/titulos/${tipo}/${id}/ingles`)
+  } catch {
+    ingles.value = null
+  }
+}
+
+async function medirIngles(ia = false) {
+  medindo.value = ia ? 'ia' : 'medir'
+  try {
+    ingles.value = await api(`/api/titulos/${tipo}/${id}/ingles${ia ? '/ia' : ''}`, { metodo: 'POST', tempo: 150000 })
+    if (!ia) vendoIngles.value = true
+  } catch (e) {
+    recado(e.message, true)
+  } finally {
+    medindo.value = ''
+  }
+}
+
 // Salvar busca (S44): a página do título é a busca dele; volta aqui pelas Buscas salvas do Início.
 async function salvarEstaBusca() {
   menuAberto.value = false
@@ -467,6 +496,7 @@ onMounted(async () => {
   }
   carregarAssinatura()
   carregarInformacoes()
+  carregarIngles()
   if (ehDocumentario.value) carregarAcervo()
   api(`/api/titulos/${tipo}/${id}/onde`, { tempo: 20000 })
     .then((l) => (outrosServicos.value = l))
@@ -511,6 +541,12 @@ onMounted(async () => {
             <p class="na-assinatura"><Icone nome="canais" />Está na sua assinatura</p>
             <BotaoFavorito :tipo="assinatura[0].tipo" :id="assinatura[0].id" />
           </div>
+          <p v-if="mostrarIngles" class="ingles">
+            <button v-if="nivel" class="chip-ingles" :class="nivel.medidas.dificuldade" type="button" @click="vendoIngles = true">
+              Inglês: {{ nivel.medidas.dificuldade }} · {{ nivel.ia?.nivel_cefr || nivel.medidas.nivel }}
+            </button>
+            <button v-else class="link" type="button" :disabled="!!medindo" @click="medirIngles()">{{ medindo ? 'Medindo o inglês…' : 'Medir o inglês (para o listening)' }}</button>
+          </p>
           <p v-if="titulo.sinopse" class="sinopse">{{ titulo.sinopse }}</p>
           <p v-if="idiomaDaSinopse" class="suave nota-sinopse">Sem sinopse em português do Brasil: esta está em {{ idiomaDaSinopse }}.</p>
           <p v-if="!titulo.sinopse && !informacoes && podePesquisar && !pesquisando" class="suave nota-sinopse">
@@ -616,6 +652,39 @@ onMounted(async () => {
       <p v-if="buscasFeitas.length" class="suave nota buscas">Buscado nos indexadores: {{ buscasFeitas.map((b) => `“${b}”`).join(', ') }}.</p>
       <p class="suave nota">Dados de filmes e séries: TMDB.<template v-if="outrosServicos.length"> Onde assistir: JustWatch.</template></p>
     </template>
+
+    <Folha v-if="vendoIngles && nivel" titulo="Nível de inglês" @fechar="vendoIngles = false">
+      <p class="resumo-ingles">
+        <strong>{{ nivel.medidas.dificuldade }}</strong> · nota {{ nivel.medidas.nota.toLocaleString('pt-BR') }} de 10 · {{ nivel.medidas.nivel }} (estimativa)
+      </p>
+      <ul class="medidas">
+        <li v-for="m in [
+          { nome: 'Vocabulário', nota: nivel.medidas.nota_vocabulario, texto: `${nivel.medidas.cobertura.toLocaleString('pt-BR')}% das palavras entre as 5 mil mais comuns` },
+          { nome: 'Velocidade', nota: nivel.medidas.nota_velocidade, texto: `${Math.round(nivel.medidas.por_minuto)} palavras por minuto de fala` },
+          { nome: 'Quanto é fala', nota: nivel.medidas.nota_densidade, texto: `${Math.round(nivel.medidas.fala)}% do tempo com alguém falando` },
+        ]" :key="m.nome">
+          <span class="nome-medida">{{ m.nome }}</span>
+          <span class="barra-medida"><span :style="{ width: `${m.nota * 10}%` }" /></span>
+          <span class="suave texto-medida">{{ m.texto }}</span>
+        </li>
+      </ul>
+      <p v-if="nivel.medidas.raras?.length" class="suave raras">Palavras pouco comuns que mais aparecem: {{ nivel.medidas.raras.slice(0, 12).map((r) => r.palavra).join(', ') }}.</p>
+      <template v-if="nivel.ia">
+        <p class="rotulo">Análise da IA</p>
+        <p class="resumo-ingles"><strong>{{ nivel.ia.nivel_cefr }}</strong> · {{ nivel.ia.dificuldade }} · nota {{ nivel.ia.nota }} de 10</p>
+        <p class="motivos">{{ nivel.ia.motivos }}</p>
+        <dl v-if="nivel.ia.expressoes?.length" class="ficha">
+          <template v-for="x in nivel.ia.expressoes" :key="x.expressao">
+            <dt>{{ x.expressao }}</dt>
+            <dd>{{ x.sentido }}</dd>
+          </template>
+        </dl>
+      </template>
+      <div v-else-if="ingles.pode_analisar" class="linha-acoes">
+        <button class="botao" :disabled="!!medindo" @click="medirIngles(true)">{{ medindo === 'ia' ? 'Analisando… (uns 15 s)' : 'Analisar com IA: nível, gírias e expressões' }}</button>
+      </div>
+      <p class="suave nota">Medido pela legenda em inglês{{ tipo === 'serie' ? ' do primeiro episódio' : '' }}. Sotaque e falas por cima umas das outras a legenda não mostra.</p>
+    </Folha>
 
     <Folha v-if="relatando" titulo="Mandar para verificação" @fechar="relatando = false">
       <form class="relato" @submit.prevent="mandarParaVerificacao">
@@ -947,6 +1016,85 @@ h1 {
   display: inline-flex;
   gap: 5px;
   align-items: center;
+}
+
+.ingles {
+  margin: -2px 0 10px;
+}
+
+.ingles .link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--marca);
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.chip-ingles {
+  padding: 3px 10px;
+  border: 1px solid var(--linha-forte);
+  border-radius: 999px;
+  background: none;
+  color: var(--texto);
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.chip-ingles.fácil {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+
+.chip-ingles.difícil {
+  border-color: var(--perigo);
+  color: var(--perigo);
+}
+
+.resumo-ingles {
+  margin: 0 0 10px;
+}
+
+.medidas {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.medidas li {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 2px 10px;
+  align-items: center;
+  font-size: 0.86rem;
+}
+
+.barra-medida {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--linha-forte);
+}
+
+.barra-medida span {
+  display: block;
+  height: 100%;
+  background: var(--marca);
+}
+
+.texto-medida {
+  grid-column: 2;
+  font-size: 0.78rem;
+}
+
+.raras,
+.motivos {
+  font-size: 0.86rem;
+  line-height: 1.5;
 }
 
 .nota-sinopse {

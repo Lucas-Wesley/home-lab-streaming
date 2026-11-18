@@ -103,7 +103,7 @@ func abrirBanco(caminho string) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := db.Exec(esquema + esquemaDosTorrents + esquemaDasLegendas + esquemaDasVerificacoes + esquemaDasOpcoes + esquemaDosDownloadsDaAssinatura + esquemaDaLegendaGerada + esquemaDosRelatos + esquemaDosEnviosAoAcervo + esquemaDosMeusVideos + esquemaDasBuscasSalvas + esquemaDaLegendaDupla + esquemaDasInformacoes); err != nil {
+	if _, err := db.Exec(esquema + esquemaDosTorrents + esquemaDasLegendas + esquemaDasVerificacoes + esquemaDasOpcoes + esquemaDosDownloadsDaAssinatura + esquemaDaLegendaGerada + esquemaDosRelatos + esquemaDosEnviosAoAcervo + esquemaDosMeusVideos + esquemaDasBuscasSalvas + esquemaDaLegendaDupla + esquemaDasInformacoes + esquemaDoNivel); err != nil {
 		db.Close()
 		return nil, err
 	}

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -64,6 +65,33 @@ func duracaoDe(t *testing.T, caminho string) float64 {
 	return d
 }
 
+// buracosNoVideo: saltos maiores que dois quadros entre os quadros de vídeo.
+func buracosNoVideo(t *testing.T, caminho string, faixa ...string) []string {
+	t.Helper()
+	stream := "v"
+	if len(faixa) > 0 {
+		stream = faixa[0]
+	}
+	saida, err := exec.Command(programaFFprobe, "-v", "error", "-select_streams", stream, "-show_entries", "packet=pts_time", "-of", "csv=p=0", caminho).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tempos []float64
+	for _, l := range strings.Fields(string(saida)) {
+		if v, err := strconv.ParseFloat(strings.TrimSuffix(l, ","), 64); err == nil {
+			tempos = append(tempos, v)
+		}
+	}
+	sort.Float64s(tempos)
+	var buracos []string
+	for i := 1; i < len(tempos); i++ {
+		if d := tempos[i] - tempos[i-1]; d > 0.09 {
+			buracos = append(buracos, fmt.Sprintf("%.3f→%.3f", tempos[i-1], tempos[i]))
+		}
+	}
+	return buracos
+}
+
 func TestGravarDuplaEmPedacos(t *testing.T) {
 	video := videoDeTeste(t)
 	queimar := queimarLegenda
@@ -89,7 +117,7 @@ func TestGravarDuplaEmPedacos(t *testing.T) {
 	if _, ok := e.a.inicioDoFluxo(chave, 12, 5); ok {
 		t.Error("5 s ainda não foi gravado")
 	}
-	if err := gravarTrecho(ctx, pasta, video, "b", 0, 12, 0); err != nil {
+	if err := gravarTrecho(ctx, pasta, video, "b", 0, 11.999, 0); err != nil {
 		t.Fatal(err)
 	}
 	faixas := juntarTrechos(e.a.trechosDaDupla(chave, 12))
@@ -123,8 +151,15 @@ func TestGravarDuplaEmPedacos(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.a.limparPedacos(chave)
-	if d := duracaoDe(t, e.a.arquivoDaDupla(chave)); math.Abs(d-20) > 0.5 {
+	if d := duracaoDe(t, e.a.arquivoDaDupla(chave)); math.Abs(d-20) > 0.15 {
 		t.Errorf("duração do MP4: %v", d)
+	}
+	// Sem buraco entre os pedaços (o concat do ffmpeg deixava ~0,1 s a cada 6 s: um engasgo).
+	if buracos := buracosNoVideo(t, e.a.arquivoDaDupla(chave)); len(buracos) > 0 {
+		t.Errorf("buracos no vídeo: %v", buracos)
+	}
+	if buracos := buracosNoVideo(t, e.a.arquivoDaDupla(chave), "a"); len(buracos) > 0 {
+		t.Errorf("buracos no áudio: %v", buracos)
 	}
 	if _, err := os.Stat(pasta); !os.IsNotExist(err) {
 		t.Error("os pedaços ficaram")

@@ -400,8 +400,8 @@ func (a *app) gravarDupla(ctx context.Context, chave string) error {
 	for _, parte := range partes {
 		for _, falta := range faltando(parte, juntarTrechos(a.trechosDaDupla(chave, comeco))) {
 			listas, _ := filepath.Glob(filepath.Join(pasta, "*.csv"))
-			ate := falta[1]
-			if ate >= duracao-0.5 {
+			ate := falta[1] - 0.001 // para antes do quadro do ponto, que a gravação seguinte já tem
+			if falta[1] >= duracao-0.5 {
 				ate = 0 // até o fim
 			}
 			if err := gravarTrecho(ctx, pasta, entrada, fmt.Sprintf("p%02d", len(listas)+1), falta[0], ate, faixa); err != nil {
@@ -530,23 +530,43 @@ func ultimasLinhas(s string, n int) string {
 	return strings.Join(linhas, " ")
 }
 
-// juntarDupla junta os pedaços, em ordem, num MP4 que se avança e volta (moov no começo).
+// juntarDupla junta os pedaços, em ordem, num MP4 que se avança e volta (moov no começo). Os pedaços
+// vão um atrás do outro, como um TS só (os tempos são os do original, contínuos): o concat do ffmpeg,
+// que soma a duração de cada arquivo, deixava ~0,1 s de buraco a cada 6 s (um engasgo).
 func (a *app) juntarDupla(ctx context.Context, chave string, comeco float64) error {
 	pasta := a.pastaDaDupla(chave)
-	var lista strings.Builder
-	for _, t := range a.trechosDaDupla(chave, comeco) {
-		fmt.Fprintf(&lista, "file '%s'\n", filepath.Base(t.arquivo))
-	}
-	if err := os.WriteFile(filepath.Join(pasta, "lista.txt"), []byte(lista.String()), 0o644); err != nil {
+	trechos := a.trechosDaDupla(chave, comeco)
+	temporario := a.arquivoDaDupla(chave) + ".juntando"
+	cmd := exec.CommandContext(ctx, programaFFmpeg, "-hide_banner", "-nostdin", "-v", "error", "-y", "-f", "mpegts", "-i", "pipe:0",
+		"-map", "0:v:0", "-map", "0:a:0?", "-c", "copy", "-movflags", "+faststart", "-f", "mp4", temporario)
+	cmd.Dir = pasta
+	entrada, err := cmd.StdinPipe()
+	if err != nil {
 		return err
 	}
-	temporario := a.arquivoDaDupla(chave) + ".juntando"
-	cmd := exec.CommandContext(ctx, programaFFmpeg, "-hide_banner", "-nostdin", "-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", "lista.txt",
-		"-map", "0", "-c", "copy", "-movflags", "+faststart", "-f", "mp4", temporario)
-	cmd.Dir = pasta
-	if saida, err := cmd.CombinedOutput(); err != nil {
+	var saida strings.Builder
+	cmd.Stderr = &saida
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	var errCopia error
+	for _, t := range trechos {
+		arq, err := os.Open(t.arquivo)
+		if err != nil {
+			errCopia = err
+			break
+		}
+		_, err = io.Copy(entrada, arq)
+		arq.Close()
+		if err != nil {
+			errCopia = err
+			break
+		}
+	}
+	entrada.Close()
+	if err := cmd.Wait(); err != nil || errCopia != nil {
 		os.Remove(temporario)
-		return fmt.Errorf("o ffmpeg falhou ao juntar: %s", ultimasLinhas(string(saida), 3))
+		return fmt.Errorf("o ffmpeg falhou ao juntar: %s %v", ultimasLinhas(saida.String(), 3), errCopia)
 	}
 	return os.Rename(temporario, a.arquivoDaDupla(chave))
 }

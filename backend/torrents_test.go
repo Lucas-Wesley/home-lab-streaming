@@ -132,6 +132,29 @@ func TestTorrentAssistirBaixarEApagar(t *testing.T) {
 		t.Fatal("o arquivo baixado está diferente do original")
 	}
 
+	// Downloads (S45): só o vídeo baixado, com o nome do arquivo (o torrent é um pacote).
+	var baixados []videoBaixado
+	e.json(t, "/api/downloads/torrents", &baixados)
+	if len(baixados) != 1 || baixados[0].ID != ep1.ID || baixados[0].Estado != "baixado" || baixados[0].Titulo != "Serie Teste" ||
+		baixados[0].Torrent != "Serie Teste S01E01.mp4" || baixados[0].Baixado != baixados[0].Tamanho || baixados[0].Episodio != 1 {
+		t.Fatalf("downloads: %+v", baixados)
+	}
+	// Ligado a um título, ganha o nome dele, lido do TMDB por trás.
+	t.Setenv("TMDB_URL", tmdbFalso(t).URL)
+	if status, corpo := e.pedir(t, "PUT", "/api/tmdb", map[string]string{"chave": "0123456789abcdef0123456789abcdef"}); status != http.StatusOK {
+		t.Fatalf("tmdb: %d %s", status, corpo)
+	}
+	e.a.db.Exec(`UPDATE torrents SET tmdb = 'serie/1396' WHERE hash = ?`, hash)
+	for prazo := time.Now().Add(5 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+		e.json(t, "/api/downloads/torrents", &baixados)
+		if baixados[0].Titulo == "Breaking Bad" && baixados[0].TMDB == "serie/1396" {
+			break
+		}
+		if time.Now().After(prazo) {
+			t.Fatalf("sem o nome do TMDB: %+v", baixados)
+		}
+	}
+
 	// Baixado, toca do disco, sem ligar o motor. Desligar apaga os trechos só assistidos (o ep. 2).
 	e.a.motor.mu.Lock()
 	if e.a.motor.cl != nil {

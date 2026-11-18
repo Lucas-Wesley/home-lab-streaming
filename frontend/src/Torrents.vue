@@ -9,16 +9,17 @@ import OpcaoDeTorrent from './OpcaoDeTorrent.vue'
 import { api } from './api.js'
 import { tamanho } from './tamanho.js'
 
-// Downloads (S28): o que está no servidor ou baixando, da assinatura e dos torrents; abaixo, os
-// torrents assistidos sem baixar. Ver a lista não baixa nada; o motor de torrent só liga para ler
-// fichas, baixar ou assistir.
+// Downloads (S45): uma lista só, vídeo por vídeo, do que está no servidor ou baixando (da assinatura
+// e de torrent), com o nome do título. Os torrents assistidos sem baixar não aparecem aqui.
 //
 // Filmes e séries se buscam no Início (assinatura e torrents juntos). Aqui fica a busca direta nos
-// indexadores, para o que o TMDB não conhece.
+// indexadores, para o que o TMDB não conhece, e o "Adicionar link magnet", para um torrent de fora.
 const props = defineProps({ busca: { type: String, default: '' } })
 const recado = inject('recado')
 
-const dados = ref(null)
+const daAssinatura = ref(null)
+const deTorrent = ref(null)
+const livre = ref(0)
 const erro = ref('')
 const adicionando = ref(false)
 const texto = ref('')
@@ -26,7 +27,6 @@ const enviando = ref(false)
 const erroAoAdicionar = ref('')
 const arquivo = ref(null)
 
-const ORIGENS = { ia: 'Internet Archive', magnet: 'Link magnet', arquivo: 'Arquivo .torrent' }
 const TIPOS = [
   { id: '', nome: 'Tudo' },
   { id: 'filme', nome: 'Filmes' },
@@ -38,22 +38,36 @@ const tipo = ref('')
 const resultados = ref(null)
 const buscando = ref(false)
 const erroDaBusca = ref('')
-const daAssinatura = ref([])
-const verOutros = ref(false)
-const assistindo = ref(null) // download da assinatura com a folha de assistir aberta
+const assistindo = ref(null) // vídeo com a folha de assistir aberta
 
 const buscaAberta = computed(() => buscando.value || resultados.value || erroDaBusca.value)
-const noServidor = computed(() => (dados.value?.torrents || []).filter((t) => t.baixados || t.baixando))
-const outros = computed(() => (dados.value?.torrents || []).filter((t) => !t.baixados && !t.baixando))
 
-const ESTADOS = { 'na fila': 'na fila', baixando: 'baixando', esperando: 'esperando a assinatura', baixado: 'baixado', erro: 'erro' }
-const porcentagem = (d) => (d.tamanho ? Math.floor((d.baixado / d.tamanho) * 100) : 0)
+const ESTADOS = { 'na fila': 'Na fila', baixando: 'Baixando', esperando: 'Esperando a assinatura ficar livre', baixado: 'No servidor', erro: 'Erro' }
+const episodio = (v) => (v.episodio ? ` · T${v.temporada} E${v.episodio}` : '')
 
-async function apagarDaAssinatura(d) {
-  if (!confirm(`Apagar "${d.titulo}" do servidor?`)) return
+// Os dois tipos de download numa lista só: o que está baixando primeiro.
+const videos = computed(() => {
+  const assinatura = (daAssinatura.value || []).map((d) => ({
+    chave: d.chave, titulo: d.titulo, capa: d.capa, origem: 'Assinatura', tamanho: d.tamanho, baixado: d.baixado, estado: d.estado, mensagem: d.mensagem,
+    apagar: () => api(`/api/assinatura/downloads/${d.chave}`, { metodo: 'DELETE' }),
+  }))
+  const torrent = (deTorrent.value || []).map((v) => ({
+    chave: `arquivo:${v.id}`, titulo: v.titulo + episodio(v), capa: v.capa, origem: 'Torrent', detalhe: v.torrent !== v.titulo ? v.torrent : '',
+    tamanho: v.tamanho, baixado: v.baixado, estado: v.estado, pagina: v.tmdb ? `#/titulo/${v.tmdb}` : '',
+    apagar: () => api(`/api/arquivos/${v.id}/baixar`, { metodo: 'DELETE' }),
+  }))
+  return [...assinatura, ...torrent].sort((a, b) => (a.estado === 'baixado') - (b.estado === 'baixado'))
+})
+const carregado = computed(() => daAssinatura.value && deTorrent.value)
+const meta = (v) =>
+  [v.origem, tamanho(v.tamanho), (ESTADOS[v.estado] || v.estado) + (v.estado !== 'baixado' && v.tamanho ? ` ${porcentagem(v)}%` : '')].filter(Boolean).join(' · ')
+const porcentagem = (v) => (v.tamanho ? Math.floor((v.baixado / v.tamanho) * 100) : 0)
+
+async function apagar(v) {
+  if (!confirm(`Apagar "${v.titulo}" do servidor?`)) return
   try {
-    await api(`/api/assinatura/downloads/${d.chave}`, { metodo: 'DELETE' })
-    daAssinatura.value = daAssinatura.value.filter((x) => x.chave !== d.chave)
+    await v.apagar()
+    carregar()
   } catch (e) {
     recado(e.message, true)
   }
@@ -105,9 +119,10 @@ watch(busca, (q) => {
 
 async function carregar() {
   try {
-    const [t, d] = await Promise.all([api('/api/torrents'), api('/api/assinatura/downloads')])
-    dados.value = t
+    const [d, t, torrents] = await Promise.all([api('/api/assinatura/downloads'), api('/api/downloads/torrents'), api('/api/torrents')])
     daAssinatura.value = d
+    deTorrent.value = t
+    livre.value = torrents.espaco_livre
     erro.value = ''
   } catch (e) {
     erro.value = e.status === 0 ? 'Sem conexão: o Streaming só abre na rede de casa.' : e.message
@@ -139,15 +154,6 @@ async function adicionar() {
   }
 }
 
-async function atualizar() {
-  try {
-    const r = await api('/api/torrents/atualizar', { metodo: 'POST' })
-    recado(r.pendentes ? `Buscando a lista de ${r.pendentes} ${r.pendentes === 1 ? 'torrent' : 'torrents'}…` : 'Todas as listas já estão aqui.')
-  } catch (e) {
-    recado(e.message, true)
-  }
-}
-
 let relogio
 onMounted(async () => {
   carregar()
@@ -162,78 +168,30 @@ onBeforeUnmount(() => clearInterval(relogio))
     <h1>Downloads</h1>
     <div v-if="erro" class="aviso erro">{{ erro }}</div>
 
-    <div class="linha-acoes topo">
-      <button class="botao principal" @click="adicionando = true"><Icone nome="torrents" />Adicionar torrent</button>
-      <a class="botao" href="#/archive">Explorar o Internet Archive</a>
-      <button class="botao" @click="atualizar"><Icone nome="atualizar" />Atualizar listas</button>
-    </div>
-    <p v-if="dados" class="suave estado">
-      Torrent {{ dados.motor_ligado ? 'ligado agora' : 'desligado' }}<template v-if="dados.espaco_livre > 0"> · {{ tamanho(dados.espaco_livre) }} livres no servidor</template>
-    </p>
-
     <template v-if="!buscaAberta">
-      <section v-if="daAssinatura.length">
-        <p class="rotulo">Da assinatura</p>
-        <ul class="lista">
-          <li v-for="d in daAssinatura" :key="d.chave" class="download">
-            <span class="capa"><img v-if="d.capa" :src="d.capa" alt="" loading="lazy" referrerpolicy="no-referrer" /><Icone v-else nome="canais" /></span>
-            <span class="texto">
-              <span class="titulo">{{ d.titulo }}</span>
-              <span class="meta">
-                <template v-if="d.tamanho">{{ tamanho(d.tamanho) }} · </template>{{ ESTADOS[d.estado] || d.estado }}<template v-if="d.estado !== 'baixado' && d.tamanho"> {{ porcentagem(d) }}%</template>
-              </span>
-              <span v-if="d.estado !== 'baixado' && d.tamanho" class="progresso"><span :style="{ width: `${porcentagem(d)}%` }" /></span>
-              <span v-if="d.mensagem" class="suave mensagem">{{ d.mensagem }}</span>
-            </span>
-            <span class="acoes">
-              <button v-if="d.estado === 'baixado'" class="botao principal" @click="assistindo = d"><Icone nome="tocar" />Assistir</button>
-              <button class="botao icone" :aria-label="`Apagar ${d.titulo}`" title="Apagar do servidor" @click="apagarDaAssinatura(d)"><Icone nome="lixeira" /></button>
-            </span>
-          </li>
-        </ul>
-      </section>
-
-      <section>
-        <p class="rotulo">Torrents no servidor</p>
-        <p v-if="dados && !noServidor.length" class="vazio">Nenhum torrent baixado. Na página de um filme ou série, “Baixar” deixa o vídeo aqui.</p>
-        <ul v-if="noServidor.length" class="lista">
-          <li v-for="t in noServidor" :key="t.hash"><a class="torrent" :href="`#/torrent/${t.hash}`">
-            <span class="capa"><img v-if="t.capa" :src="t.capa" alt="" loading="lazy" referrerpolicy="no-referrer" /><Icone v-else nome="torrents" /></span>
-            <span class="texto">
-              <span class="titulo">{{ t.titulo }}</span>
-              <span class="meta">{{ ORIGENS[t.origem] }}<template v-if="t.tamanho"> · {{ tamanho(t.tamanho) }}</template></span>
-              <span class="chips">
-                <span v-if="t.baixando" class="chip andando">{{ t.baixando }} baixando</span>
-                <span v-if="t.baixados" class="chip ok">{{ t.baixados }} {{ t.baixados === 1 ? 'baixado' : 'baixados' }}</span>
-                <span v-if="t.erro" class="chip erro">{{ t.erro }}</span>
-              </span>
-            </span>
-          </a></li>
-        </ul>
-      </section>
-
-      <section v-if="outros.length">
-        <button class="limpar outros" @click="verOutros = !verOutros">
-          {{ verOutros ? 'Esconder' : 'Mostrar' }} {{ outros.length }} {{ outros.length === 1 ? 'torrent assistido' : 'torrents assistidos' }} sem baixar
-        </button>
-        <ul v-if="verOutros" class="lista">
-          <li v-for="t in outros" :key="t.hash"><a class="torrent" :href="`#/torrent/${t.hash}`">
-            <span class="capa"><img v-if="t.capa" :src="t.capa" alt="" loading="lazy" referrerpolicy="no-referrer" /><Icone v-else nome="torrents" /></span>
-            <span class="texto">
-              <span class="titulo">{{ t.titulo }}</span>
-              <span class="meta">{{ ORIGENS[t.origem] }}<template v-if="t.tamanho"> · {{ tamanho(t.tamanho) }}</template></span>
-              <span class="chips">
-                <span v-if="!t.tem_ficha && !t.erro" class="chip andando">buscando a lista</span>
-                <span v-if="t.erro" class="chip erro">{{ t.erro }}</span>
-              </span>
-            </span>
-          </a></li>
-        </ul>
-      </section>
+      <p v-if="livre > 0" class="suave estado">{{ tamanho(livre) }} livres no servidor</p>
+      <p v-if="carregado && !videos.length" class="vazio">Nada no servidor. Na página de um filme ou série, “Baixar” deixa o vídeo aqui.</p>
+      <ul v-if="videos.length" class="lista">
+        <li v-for="v in videos" :key="v.chave" class="download">
+          <span class="capa"><img v-if="v.capa" :src="v.capa" alt="" loading="lazy" referrerpolicy="no-referrer" /><Icone v-else :nome="v.origem === 'Torrent' ? 'torrents' : 'canais'" /></span>
+          <span class="texto">
+            <a v-if="v.pagina" class="titulo" :href="v.pagina">{{ v.titulo }}</a>
+            <span v-else class="titulo">{{ v.titulo }}</span>
+            <span class="meta">{{ meta(v) }}</span>
+            <span v-if="v.estado !== 'baixado' && v.tamanho" class="progresso"><span :style="{ width: `${porcentagem(v)}%` }" /></span>
+            <span v-if="v.detalhe" class="suave detalhe">{{ v.detalhe }}</span>
+            <span v-if="v.mensagem" class="suave mensagem">{{ v.mensagem }}</span>
+          </span>
+          <span class="acoes">
+            <button v-if="v.estado === 'baixado'" class="botao principal" @click="assistindo = v"><Icone nome="tocar" />Assistir</button>
+            <button class="botao icone" :aria-label="`Apagar ${v.titulo}`" title="Apagar do servidor" @click="apagar(v)"><Icone nome="lixeira" /></button>
+          </span>
+        </li>
+      </ul>
     </template>
 
     <p class="rotulo busca-direta">Busca direta nos indexadores</p>
-    <p class="suave nota">Filmes e séries se buscam no Início. Aqui, o que o TMDB não conhece (Enter para buscar).</p>
+    <p class="suave nota">Filmes e séries se buscam no Início. Aqui, o que o TMDB não conhece (Enter para buscar), ou <button class="limpar" type="button" @click="adicionando = true">cole um link magnet</button>.</p>
     <form class="busca" @submit.prevent="enviar">
       <Icone nome="pesquisar" />
       <input v-model="busca" class="campo" type="search" placeholder="Nome do torrent" aria-label="Buscar nos indexadores" autocomplete="off" enterkeyhint="search" />
@@ -260,9 +218,9 @@ onBeforeUnmount(() => clearInterval(relogio))
       <Assistir :chave="assistindo.chave" :titulo="assistindo.titulo" :capa="assistindo.capa" @escolheu="assistindo = null" />
     </Folha>
 
-    <Folha v-if="adicionando" titulo="Adicionar torrent" @fechar="adicionando = false">
+    <Folha v-if="adicionando" titulo="Adicionar link magnet" @fechar="adicionando = false">
       <form class="adicionar" @submit.prevent="adicionar">
-        <p class="suave explicacao">Cole um link magnet ou um link do Internet Archive, ou escolha um arquivo .torrent. Nada é baixado agora: só a lista de arquivos.</p>
+        <p class="suave explicacao">Cole um link magnet (de um site ou de alguém) ou escolha um arquivo .torrent. Nada é baixado agora: abre a lista de arquivos, para assistir ou baixar.</p>
         <textarea v-model="texto" class="campo" rows="3" placeholder="magnet:?xt=urn:btih:…" aria-label="Link do torrent" />
         <label class="arquivo">Arquivo .torrent <input ref="arquivo" type="file" accept=".torrent,application/x-bittorrent" /></label>
         <div v-if="erroAoAdicionar" class="aviso erro">{{ erroAoAdicionar }}</div>
@@ -319,61 +277,6 @@ onBeforeUnmount(() => clearInterval(relogio))
   cursor: pointer;
 }
 
-.direto {
-  margin: 18px 0 0;
-  color: var(--texto-suave);
-  font-size: 0.88rem;
-}
-
-.direto .limpar {
-  font-size: 0.88rem;
-}
-
-.grade {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
-  gap: 22px 14px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  transition: opacity 0.2s ease;
-}
-
-.cartaz {
-  display: grid;
-  gap: 6px;
-  color: inherit;
-  text-decoration: none;
-}
-
-.cartaz .capa {
-  display: grid;
-  place-items: center;
-  width: 100%;
-  height: auto;
-  aspect-ratio: 2 / 3;
-}
-
-.cartaz .nome {
-  display: -webkit-box;
-  overflow: hidden;
-  font-size: 0.88rem;
-  font-weight: 550;
-  line-height: 1.3;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-}
-
-.cartaz:hover .nome {
-  color: var(--marca);
-}
-
-.cartaz .meta {
-  margin-top: -3px;
-  color: var(--texto-fraco);
-  font-size: 0.75rem;
-}
-
 .esmaecida {
   opacity: 0.5;
 }
@@ -411,10 +314,6 @@ onBeforeUnmount(() => clearInterval(relogio))
   font-size: 0.78rem;
 }
 
-.outros {
-  margin: 18px 0 4px;
-}
-
 .busca-direta {
   margin-top: 32px;
 }
@@ -422,10 +321,6 @@ onBeforeUnmount(() => clearInterval(relogio))
 .nota {
   margin: -4px 0 10px;
   font-size: 0.82rem;
-}
-
-.topo {
-  margin-bottom: 10px;
 }
 
 .botao svg {
@@ -436,14 +331,6 @@ onBeforeUnmount(() => clearInterval(relogio))
 .estado {
   margin: 0 0 18px;
   font-size: 0.82rem;
-}
-
-.torrent {
-  display: flex;
-  gap: 14px;
-  padding: 14px 0;
-  color: inherit;
-  text-decoration: none;
 }
 
 .capa {
@@ -478,24 +365,25 @@ onBeforeUnmount(() => clearInterval(relogio))
   transition: color 0.15s ease;
 }
 
-.torrent:hover .titulo {
+a.titulo {
+  color: inherit;
+  text-decoration: none;
+}
+
+a.titulo:hover {
   color: var(--marca);
+}
+
+.detalhe {
+  overflow: hidden;
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .meta {
   color: var(--texto-suave);
   font-size: 0.82rem;
-}
-
-.chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 2px;
-}
-
-.chips .chip.erro {
-  white-space: normal;
 }
 
 .adicionar {
@@ -520,12 +408,5 @@ onBeforeUnmount(() => clearInterval(relogio))
   gap: 4px;
   color: var(--texto-suave);
   font-size: 0.85rem;
-}
-
-@media (max-width: 820px) {
-  .grade {
-    grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
-    gap: 18px 10px;
-  }
 }
 </style>

@@ -124,6 +124,7 @@ func abrirBanco(caminho string) (*sql.DB, error) {
 		`ALTER TABLE pedidos_do_telegram ADD COLUMN mensagens TEXT NOT NULL DEFAULT ''`,  // S42: as escolhidas no rastreio
 		`ALTER TABLE pedidos_do_telegram ADD COLUMN previsto INTEGER NOT NULL DEFAULT 0`, // S42: bytes que vêm
 		`ALTER TABLE telas ADD COLUMN toca_4k INTEGER NOT NULL DEFAULT 1`,                // S43: o projetor (2K) não toca 4K
+		`ALTER TABLE torrents ADD COLUMN nome_do_titulo TEXT NOT NULL DEFAULT ''`,        // S45: o nome do TMDB, para Downloads
 	} {
 		if _, err := db.Exec(c); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			db.Close()

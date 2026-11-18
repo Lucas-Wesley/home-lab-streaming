@@ -8,7 +8,6 @@ import Controle from './Controle.vue'
 import Favoritos from './Favoritos.vue'
 import Filme from './Filme.vue'
 import Icone from './Icone.vue'
-import Archive from './Archive.vue'
 import Inicio from './Inicio.vue'
 import MeusVideos from './MeusVideos.vue'
 import Outros from './Outros.vue'
@@ -56,7 +55,7 @@ const secao = computed(() => {
   if (n === 'filme') return 'filmes'
   if (n === 'serie') return 'series'
   if (n === 'titulo') return 'inicio'
-  if (n === 'torrent' || n === 'archive') return 'torrents'
+  if (n === 'torrent') return 'torrents'
   return n
 })
 
@@ -157,7 +156,6 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', aoMudarHash))
       <Torrents v-else-if="rota.nome === 'torrents'" :busca="rota.opcoes.get('q') || ''" />
       <Titulo v-else-if="rota.nome === 'titulo'" :key="rota.param" :param="rota.param" />
       <Torrent v-else-if="rota.nome === 'torrent'" :key="rota.param" :hash="rota.param" />
-      <Archive v-else-if="rota.nome === 'archive'" />
       <MeusVideos
         v-else-if="rota.nome === 'meus-videos'"
         :key="rota.param"

@@ -57,6 +57,7 @@ func (a *app) handlePrepararOpcao(w http.ResponseWriter, r *http.Request) {
 	a.db.ExecContext(r.Context(), `UPDATE torrents SET oculto = 0 WHERE hash = ?`, hash)
 	if reTMDBGuardado.MatchString(p.TMDB) {
 		a.db.ExecContext(r.Context(), `UPDATE torrents SET tmdb = ? WHERE hash = ?`, p.TMDB, hash)
+		go a.nomearPeloTMDB(hash, p.TMDB)
 	}
 	f, err := a.videoPrincipal(r.Context(), hash, p.Temporada, p.Episodio)
 	if err != nil {

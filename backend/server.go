@@ -33,6 +33,7 @@ func newServer(a *app, web fs.FS, version string) http.Handler {
 	mux.HandleFunc("POST /api/reproducao", a.handleAssumir)
 
 	mux.HandleFunc("GET /api/torrents", a.handleTorrents)
+	mux.HandleFunc("GET /api/downloads/torrents", a.handleDownloadsDeTorrent) // S45: só os vídeos no servidor
 	mux.HandleFunc("POST /api/torrents", a.handleAdicionarTorrent)
 	mux.HandleFunc("POST /api/torrents/atualizar", a.handleAtualizarTorrents)
 	mux.HandleFunc("GET /api/torrents/{hash}", a.handleTorrent)
@@ -41,7 +42,6 @@ func newServer(a *app, web fs.FS, version string) http.Handler {
 	mux.HandleFunc("DELETE /api/arquivos/{id}/baixar", a.handleBaixarArquivo)
 	mux.HandleFunc("POST /api/arquivos/{id}/visto", a.handleVisto)
 	mux.HandleFunc("DELETE /api/arquivos/{id}/visto", a.handleVisto)
-	mux.HandleFunc("GET /api/archive", a.handleBuscarNoArchive)
 	mux.HandleFunc("GET /api/procurar", a.handleProcurarTorrents)
 	mux.HandleFunc("POST /api/verificacoes", a.handleVerificar)
 	mux.HandleFunc("GET /api/verificacoes", a.handleVerificacoes)

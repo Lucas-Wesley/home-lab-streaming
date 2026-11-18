@@ -300,15 +300,6 @@ func (a *app) urlDoArchive() string {
 	return strings.TrimRight(env("ARCHIVE_URL", "https://archive.org"), "/")
 }
 
-type itemDoArchive struct {
-	ID        string `json:"id"`
-	Titulo    string `json:"titulo"`
-	Ano       string `json:"ano,omitempty"`
-	Sinopse   string `json:"sinopse,omitempty"`
-	Capa      string `json:"capa"`
-	Downloads int64  `json:"downloads,omitempty"`
-}
-
 var reTags = regexp.MustCompile(`<[^>]+>`)
 
 func textoSimples(s string) string {
@@ -381,52 +372,6 @@ func (a *app) buscarJSONPublico(ctx context.Context, endereco string, destino an
 		return err
 	}
 	return json.Unmarshal(b, destino)
-}
-
-// Coleções de vídeo do Internet Archive com mais itens (conferido em 09/11/2026).
-var colecoesDoArchive = map[string]bool{"feature_films": true, "animationandcartoons": true, "classic_tv": true, "silent_films": true}
-
-func (a *app) handleBuscarNoArchive(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	colecao := q.Get("colecao")
-	if !colecoesDoArchive[colecao] {
-		colecao = "feature_films"
-	}
-	consulta := "collection:" + colecao + " AND mediatype:movies"
-	if termo := strings.TrimSpace(q.Get("q")); termo != "" {
-		consulta += " AND (" + strings.NewReplacer(`"`, "", `(`, "", `)`, "", `:`, " ").Replace(termo) + ")"
-	}
-	parametros := url.Values{
-		"q": {consulta}, "fl[]": {"identifier", "title", "year", "description", "downloads"},
-		"sort[]": {"downloads desc"}, "rows": {"36"}, "page": {strconv.Itoa(numero(q.Get("pagina"), 1, 1, 100))}, "output": {"json"},
-	}
-	var resposta struct {
-		Response struct {
-			Docs []struct {
-				Identifier  string          `json:"identifier"`
-				Title       json.RawMessage `json:"title"`
-				Year        flex            `json:"year"`
-				Description json.RawMessage `json:"description"`
-				Downloads   flex            `json:"downloads"`
-			} `json:"docs"`
-		} `json:"response"`
-	}
-	if err := a.buscarJSONPublico(r.Context(), a.urlDoArchive()+"/advancedsearch.php?"+parametros.Encode(), &resposta); err != nil {
-		erroJSON(w, http.StatusBadGateway, "Não consegui buscar no Internet Archive: "+err.Error())
-		return
-	}
-	lista := []itemDoArchive{}
-	for _, d := range resposta.Response.Docs {
-		sinopse := []rune(textoSimples(textoDoArchive(d.Description)))
-		if len(sinopse) > 280 {
-			sinopse = append(sinopse[:280], '…')
-		}
-		lista = append(lista, itemDoArchive{
-			ID: d.Identifier, Titulo: primeiro(textoDoArchive(d.Title), d.Identifier), Ano: string(d.Year),
-			Sinopse: string(sinopse), Capa: a.urlDoArchive() + "/services/img/" + url.PathEscape(d.Identifier), Downloads: d.Downloads.int(),
-		})
-	}
-	writeJSON(w, http.StatusOK, lista)
 }
 
 // ---------- Consultas ----------

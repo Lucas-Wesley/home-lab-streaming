@@ -249,7 +249,8 @@ async function rastrear() {
     const r = await api('/api/meus-videos/telegram/rastrear', { metodo: 'POST', corpo: { link: linkDoTelegram(form.value.link) }, tempo: 200000 })
     rastreio.value = r.salvo ? { ...r, de: new Date().toISOString() } : r
     escolhidos.value = new Set(r.videos.filter((v) => !v.ja).map((v) => v.mensagem))
-    if (!form.value.pasta.trim()) form.value.pasta = r.pasta
+    // A pasta é a do grupo (ou a que ficou no salvo dele): a do grupo anterior não vale para este.
+    form.value.pasta = salvos.value.find((s) => s.id === r.salvo)?.pasta || r.pasta
     if (r.salvo) await carregar() // a lista salva virou esta
   } catch (e) {
     erroDoForm.value = e.message

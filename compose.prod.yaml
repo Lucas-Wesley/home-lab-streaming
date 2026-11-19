@@ -23,9 +23,6 @@ services:
       # Avisos no celular (S35): o ntfy do homelab (homelab/ntfy), tópico "streaming".
       NTFY_URL: http://ntfy/streaming
       CLAUDE_TOKEN_ARQUIVO: /claude/token
-      # Telegram (S56): 4 arquivos ao mesmo tempo, 8 partes cada (o padrão do tdl é 2 e 4).
-      TDL_LIMITE: "4"
-      TDL_PARTES: "8"
     extra_hosts:
       - host.docker.internal:host-gateway
     volumes:

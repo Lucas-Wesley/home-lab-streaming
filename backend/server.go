@@ -31,6 +31,7 @@ func newServer(a *app, web fs.FS, version string) http.Handler {
 	mux.HandleFunc("HEAD /api/video/{tipo}/{arquivo}", a.servirVideo(false))
 	mux.HandleFunc("GET /api/video/{tipo}/{id}/parte", a.handleParte)
 	mux.HandleFunc("POST /api/reproducao", a.handleAssumir)
+	mux.HandleFunc("GET /api/reproducao", a.handleQuemAssiste)
 
 	mux.HandleFunc("GET /api/torrents", a.handleTorrents)
 	mux.HandleFunc("GET /api/downloads/torrents", a.handleDownloadsDeTorrent) // S45: só os vídeos no servidor
@@ -107,6 +108,7 @@ func newServer(a *app, web fs.FS, version string) http.Handler {
 
 	mux.HandleFunc("GET /api/jogos", a.handleJogos)
 	mux.HandleFunc("GET /api/canais/esportes", a.handleCanaisDeEsportes)
+	mux.HandleFunc("GET /api/canais/{id}/alternativas", a.handleAlternativas)
 	mux.HandleFunc("GET /api/telas", a.handleTelas)
 	mux.HandleFunc("POST /api/telas/procurar", a.handleProcurarTelas)
 	mux.HandleFunc("GET /api/telas/sessoes", a.handleSessoes)

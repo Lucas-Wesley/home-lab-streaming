@@ -22,6 +22,8 @@ const carregando = ref(true)
 const dia = ref('')
 const canal = ref(null) // { id, nome, capa, versoes }
 const grupoAberto = ref(null)
+const lidosEm = ref(null)
+const atualizando = ref(false)
 
 const dias = computed(() => {
   const lista = [...new Set(jogos.value.map((j) => j.dia))].filter((d) => d >= hoje.value).sort()
@@ -58,6 +60,7 @@ async function carregarJogos() {
     hoje.value = r.hoje
     erroDaAgenda.value = ''
     servicos.value = r.servicos || []
+    lidosEm.value = new Date()
   } catch (e) {
     erroDaAgenda.value = e.status === 0 ? '' : e.message
   }
@@ -69,6 +72,13 @@ async function carregarCanais() {
   } catch (e) {
     erro.value = e.status === 0 ? 'Sem conexão: o Streaming só abre na rede de casa.' : e.message
   }
+}
+
+// Botão "Atualizar": relê jogos e canais agora (o placar e o "agora" do guia).
+async function atualizar() {
+  atualizando.value = true
+  await Promise.all([carregarJogos(), carregarCanais()])
+  atualizando.value = false
 }
 
 // O placar anda: relê os jogos a cada minuto (o servidor só vai ao ge quando precisa) e os canais
@@ -103,6 +113,10 @@ onBeforeUnmount(() => clearInterval(relogio))
           @click="verServicos = true"
         >
           <Icone nome="alerta" />
+        </button>
+        <button class="atualizar" :class="{ girando: atualizando }" :disabled="atualizando" :title="lidosEm ? `Atualizado às ${hora(lidosEm.toISOString())}` : 'Atualizar'" aria-label="Atualizar os jogos" @click="atualizar">
+          <Icone nome="atualizar" />
+          <span v-if="lidosEm" class="lidos">{{ atualizando ? 'Atualizando…' : `às ${hora(lidosEm.toISOString())}` }}</span>
         </button>
         <div v-if="dias.length > 1" class="pilulas" role="tablist">
           <button
@@ -262,6 +276,41 @@ onBeforeUnmount(() => clearInterval(relogio))
   background: transparent;
   color: color-mix(in srgb, var(--marca) 70%, var(--texto-fraco));
   cursor: pointer;
+}
+
+.atualizar {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  margin-left: -8px;
+  padding: 3px 8px 3px 5px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--texto-fraco);
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.atualizar:hover {
+  background: var(--superficie);
+  color: var(--texto);
+}
+
+.atualizar svg {
+  width: 16px;
+  height: 16px;
+}
+
+.atualizar.girando svg {
+  animation: girar 0.9s linear infinite;
+}
+
+@keyframes girar {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .alerta svg {

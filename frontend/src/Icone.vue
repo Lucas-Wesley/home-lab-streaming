@@ -96,6 +96,29 @@ defineProps({ nome: { type: String, required: true } })
     <path v-else-if="nome === 'salvo'" d="M7 4.5h10a1 1 0 011 1v14l-6-4-6 4v-14a1 1 0 011-1z" />
     <path v-else-if="nome === 'salvo-cheio'" d="M7 4.5h10a1 1 0 011 1v14l-6-4-6 4v-14a1 1 0 011-1z" fill="currentColor" />
     <path v-else-if="nome === 'pasta'" d="M3.5 7a2 2 0 012-2h4l2 2.5h7a2 2 0 012 2V17a2 2 0 01-2 2h-13a2 2 0 01-2-2z" />
+    <template v-else-if="nome === 'menos10'">
+      <path d="M4.5 12a7.5 7.5 0 107.5-7.5H8.5" />
+      <path d="M10.5 2L8 4.5 10.5 7" />
+      <text x="12" y="15.2" text-anchor="middle" font-size="7" font-weight="600" fill="currentColor" stroke="none">10</text>
+    </template>
+    <template v-else-if="nome === 'mais10'">
+      <path d="M19.5 12A7.5 7.5 0 1112 4.5h3.5" />
+      <path d="M13.5 2L16 4.5 13.5 7" />
+      <text x="12" y="15.2" text-anchor="middle" font-size="7" font-weight="600" fill="currentColor" stroke="none">10</text>
+    </template>
+    <template v-else-if="nome === 'pip'">
+      <rect x="3.5" y="5.5" width="17" height="13" rx="2" />
+      <rect x="12" y="12" width="6" height="4.5" rx="1" fill="currentColor" stroke="none" />
+    </template>
+    <template v-else-if="nome === 'volume'">
+      <path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" />
+      <path d="M15.5 9a4.5 4.5 0 010 6M18 6.5a8 8 0 010 11" />
+    </template>
+    <template v-else-if="nome === 'qualidade'">
+      <path d="M4 7h9M17 7h3M4 17h3M11 17h9" />
+      <circle cx="15" cy="7" r="2" />
+      <circle cx="9" cy="17" r="2" />
+    </template>
     <path v-else-if="nome === 'atualizar'" d="M19.5 12a7.5 7.5 0 11-2.2-5.3M19.5 4.5v4h-4" />
   </svg>
 </template>

@@ -3,7 +3,7 @@
 App do **ecossistema de apps pessoais do Lucas**: central de streaming (canais, filmes e séries de uma assinatura
 IPTV) com o celular como controle remoto da TV e do projetor.
 
-**Comece lendo:** [`docs/DECISOES.md`](docs/DECISOES.md) — estado atual, decisões (S1–S49) e próximos passos.
+**Comece lendo:** [`docs/DECISOES.md`](docs/DECISOES.md) — estado atual, decisões (S1–S51) e próximos passos.
 
 ## Em uma frase
 O servidor guarda o acesso e o catálogo, repassa o vídeo do provedor (para o PWA em `/api/video`, para as telas em
@@ -60,6 +60,9 @@ Mesma infraestrutura e mesmo design system (`docs/DESIGN-SYSTEM.md`) das outras 
   áudios por `POST /api/geracoes/{id}/audios` (F45 de lá): mudar um lado é mudar o outro. A fonte de cada cartão (o link da
   fala) identifica a frase nos dois apps. O áudio da assinatura só com a conexão livre (`fonteDoAudio`). Nos testes,
   `novoFlashcardsFalso` e `openSubtitlesDasFrases`.
+- **Player** (S51): controles próprios em `Player.vue`; regras sem Vue em `player.js` (com teste). O dono da conexão de um
+  aparelho é `app:<código>` (`aparelho.js`); "app" sozinho é versão antiga do app ou o servidor recém-ligado. Gavetas do
+  player ficam dentro dele (a `Folha` some em tela cheia). Teste de navegador com WebM do ffmpeg (`e2e/player.spec.js`).
 - **Títulos para verificar** (S37): o Lucas manda títulos estranhos pelo menu ⋯ da página do título. Quando ele
   pedir para "verificar os títulos reportados", seguir [`docs/PARA-VERIFICAR.md`](docs/PARA-VERIFICAR.md).
 - **Commits:** autoria do Lucas; **sem linha `Co-Authored-By`**.

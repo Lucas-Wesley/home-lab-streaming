@@ -35,7 +35,11 @@ var errOutraReproducao = errors.New("outra reprodução assumiu a assinatura")
 type conexao struct {
 	mu      sync.Mutex
 	atual   string // chave do vídeo dono da conexão: filme:1, episodio:2, canal:3
-	dono    string // "app" ou o id da tela
+	dono    string // "app" (ou "app:<aparelho>", S51) ou o id da tela
+	desde   time.Time
+	// nomes dos aparelhos que já assumiram ("o celular", "o computador Windows"), para o aviso de
+	// quem pegou a conexão (S51).
+	nomes map[string]string
 	abertos map[int]aberto
 	prox    int
 	// Enquanto o servidor usa a conexão por trás (S28), quem era o dono antes dele.
@@ -56,10 +60,15 @@ const donoPorTras = "servidor"
 func (c *conexao) assumir(chave, dono string) {
 	c.mu.Lock()
 	c.cortarOQueEPorTras()
-	anterior := c.dono
+	anterior, chaveAnterior := c.dono, c.atual
 	c.atual, c.dono = chave, dono
+	if anterior != dono || chaveAnterior != chave {
+		c.desde = time.Now()
+	}
+	// Outro aparelho com o mesmo vídeo também corta o que estava aberto: seriam duas conexões.
+	trocouDeAparelho := anterior != "" && anterior != donoPorTras && anterior != dono
 	for id, ab := range c.abertos {
-		if ab.chave != chave {
+		if ab.chave != chave || trocouDeAparelho {
 			ab.cancel()
 			delete(c.abertos, id)
 		}
@@ -69,6 +78,23 @@ func (c *conexao) assumir(chave, dono string) {
 	if anterior != "" && anterior != donoPorTras && anterior != dono && avisar != nil {
 		go avisar(anterior)
 	}
+}
+
+// nomear guarda o nome de um aparelho para o aviso de quem está assistindo.
+func (c *conexao) nomear(dono, nome string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.nomes == nil {
+		c.nomes = map[string]string{}
+	}
+	c.nomes[dono] = nome
+}
+
+// quem diz quem tem a conexão agora, com o nome do aparelho e desde quando.
+func (c *conexao) quem() (chave, dono, nome, titulo string, desde time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.atual, c.dono, c.nomes[c.dono], c.nomes["titulo:"+c.atual], c.desde
 }
 
 func (c *conexao) donoAtual() (chave, dono string) {
@@ -84,7 +110,7 @@ func (c *conexao) entrar(ctx context.Context, chave string) (context.Context, fu
 	defer c.mu.Unlock()
 	c.cortarOQueEPorTras()
 	if c.atual == "" {
-		c.atual, c.dono = chave, "app"
+		c.atual, c.dono, c.desde = chave, "app", time.Now()
 	}
 	if chave != c.atual {
 		return nil, nil, errOutraReproducao
@@ -615,7 +641,10 @@ func (a *app) handleParte(w http.ResponseWriter, r *http.Request) {
 // conexão, e o que estava tocando em outro lugar para (S5).
 func (a *app) handleAssumir(w http.ResponseWriter, r *http.Request) {
 	var corpo struct {
-		Chave string `json:"chave"`
+		Chave    string `json:"chave"`
+		Aparelho string `json:"aparelho"` // S51: quem assume, para avisar o outro aparelho
+		Nome     string `json:"nome"`
+		Titulo   string `json:"titulo"`
 	}
 	if !lerCorpo(w, r, &corpo) {
 		return
@@ -626,7 +655,12 @@ func (a *app) handleAssumir(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a.usaAConexao(r.Context(), corpo.Chave) {
-		a.conexao.assumir(corpo.Chave, "app")
+		dono := donoDoAparelho(corpo.Aparelho)
+		if dono != "app" && corpo.Nome != "" {
+			a.conexao.nomear(dono, cortarAviso(corpo.Nome, 60))
+		}
+		a.conexao.assumir(corpo.Chave, dono)
+		a.conexao.nomear("titulo:"+corpo.Chave, cortarAviso(corpo.Titulo, 120))
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

@@ -144,3 +144,39 @@ func (a *app) handleAlternativas(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"nome": base, "versoes": versoes, "grupo": grupo, "irmaos": irmaos})
 }
+
+// ---------- Próximo episódio (S52) ----------
+
+// handleProximoEpisodio diz qual episódio vem depois deste (o seguinte da temporada, ou o primeiro da
+// próxima), do banco, sem ir ao provedor. Sem próximo, `proximo` vem nulo.
+func (a *app) handleProximoEpisodio(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	atual, err := a.episodio(r.Context(), id)
+	if err != nil {
+		erroJSON(w, http.StatusNotFound, "Episódio não encontrado.")
+		return
+	}
+	lista, err := a.episodios(r.Context(), atual.SerieID)
+	if err != nil {
+		falha(w, err)
+		return
+	}
+	var nomeDaSerie string
+	_ = a.db.QueryRowContext(r.Context(), `SELECT nome FROM itens WHERE tipo = 'serie' AND id = ?`, atual.SerieID).Scan(&nomeDaSerie)
+	for i, e := range lista {
+		if e.ID == id && i+1 < len(lista) {
+			p := lista[i+1]
+			// Quase no fim (ou visto) conta como novo: começa do zero.
+			if p.Duracao > 0 && p.Posicao > float64(p.Duracao)*0.92 {
+				p.Posicao = 0
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"proximo": p, "serie": nomeDaSerie})
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"proximo": nil, "serie": nomeDaSerie})
+}

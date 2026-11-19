@@ -98,3 +98,25 @@ func TestOutroAparelhoCortaOMesmoVideo(t *testing.T) {
 		t.Fatal("o vídeo do outro aparelho continuou aberto")
 	}
 }
+
+// Depois do episódio 1 vem o 2; depois do último, nenhum (S52).
+func TestProximoEpisodio(t *testing.T) {
+	e := novoAmbiente(t)
+	e.pedir(t, "GET", "/api/series/300", nil) // guarda os episódios
+	var r struct {
+		Proximo *episodio
+		Serie   string
+	}
+	e.json(t, "/api/episodios/301/proximo", &r)
+	if r.Proximo == nil || r.Proximo.ID != 302 || r.Proximo.Numero != 2 || r.Proximo.Titulo != "O meio" {
+		t.Fatalf("próximo: %+v", r.Proximo)
+	}
+	r.Proximo = nil
+	e.json(t, "/api/episodios/302/proximo", &r)
+	if r.Proximo != nil {
+		t.Fatalf("depois do último: %+v", r.Proximo)
+	}
+	if status, _ := e.pedir(t, "GET", "/api/episodios/999/proximo", nil); status != 404 {
+		t.Fatalf("episódio que não existe: %d", status)
+	}
+}

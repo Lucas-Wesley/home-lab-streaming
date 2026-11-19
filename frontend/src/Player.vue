@@ -6,7 +6,7 @@ import OpcoesDoAoVivo from './OpcoesDoAoVivo.vue'
 import { api } from './api.js'
 import { meuAparelho } from './aparelho.js'
 import { acompanharGeracao, enderecoDaLegenda, esperarAjuste } from './legendas.js'
-import { ESPERAS, folgaCarregada, perdeuAConexao, proximaVersao, rotuloDaVersao, textoDeQuemPegou } from './player.js'
+import { ESPERAS, faltaParaOFim, folgaCarregada, passagem, perdeuAConexao, proximaVersao, rotuloDaVersao, textoDeQuemPegou } from './player.js'
 import { carregarTelas, telas, tocarNaTela } from './telas.js'
 import { enderecoDoVideo, relogio, rotaDoPlayer, separarChave } from './tempo.js'
 import { voltar } from './voltar.js'
@@ -430,8 +430,10 @@ async function alternarTelaCheia() {
       await document.exitFullscreen()
       return
     }
-    if (caixa.value?.requestFullscreen) {
-      await caixa.value.requestFullscreen({ navigationUI: 'hide' })
+    // A página inteira (o player já a cobre): assim a tela cheia continua no próximo episódio.
+    const el = document.documentElement
+    if (el.requestFullscreen) {
+      await el.requestFullscreen({ navigationUI: 'hide' })
       // No celular, tela cheia é deitado.
       await screen.orientation?.lock?.('landscape').catch(() => {})
     } else {
@@ -458,12 +460,29 @@ async function alternarPip() {
 
 // ---------- Controles que somem ----------
 
+// Somem depois de 3 s com o mouse parado; no celular, 5 s depois do toque (dá tempo de achar o
+// botão). Tocar em qualquer controle conta o tempo de novo.
+let ultimoPonteiro = 'mouse'
 function mostrarControles() {
   controles.value = true
   clearTimeout(esconderControles)
   esconderControles = setTimeout(() => {
-    if (estado.value === 'tocando' && !gaveta.value && arrastando.value == null) controles.value = false
-  }, 3200)
+    if (estado.value === 'tocando' && !gaveta.value && arrastando.value == null && !proximoNaTela.value) controles.value = false
+  }, ultimoPonteiro === 'mouse' ? 3000 : 5000)
+}
+
+// Só o mouse mostra os controles ao mexer: no celular, o toque também solta um "pointermove", e
+// aí o mesmo toque mostrava e escondia os controles na hora (S52).
+function aoMexer(e) {
+  if (e.pointerType === 'mouse') {
+    ultimoPonteiro = 'mouse'
+    mostrarControles()
+  }
+}
+
+function aoTocarNosControles(e) {
+  ultimoPonteiro = e.pointerType || 'mouse'
+  mostrarControles()
 }
 
 // Toque no vídeo: no celular, mostra e esconde os controles, e dois toques nas laterais pulam 10 s;
@@ -478,6 +497,7 @@ function tocouNoPalco(e) {
   const agora = Date.now()
   const duplo = agora - ultimoToque.quando < 320 && ultimoToque.lado === lado
   ultimoToque = { quando: duplo ? 0 : agora, lado }
+  ultimoPonteiro = e.pointerType || 'mouse'
   if (e.pointerType === 'mouse') {
     clearTimeout(cliqueAdiado)
     if (duplo) return alternarTelaCheia()
@@ -542,6 +562,55 @@ function trocarVersao(v) {
 function trocarNivel(i) {
   nivel.value = i
   if (hls) hls.currentLevel = i
+}
+
+// ---------- Próximo episódio (S52) ----------
+
+const proximo = ref(null) // { id, temporada, numero, titulo, posicao } e o nome da série
+const nomeDaSerie = ref('')
+const contagem = ref(0) // segundos até ir sozinho, depois que o episódio acaba
+const dispensado = ref(false)
+let relogioDaContagem
+
+async function carregarProximo() {
+  if (tipo !== 'episodio') return
+  try {
+    const r = await api(`/api/episodios/${separarChave(props.chave).id}/proximo`)
+    proximo.value = r.proximo
+    nomeDaSerie.value = r.serie
+  } catch {
+    proximo.value = null
+  }
+}
+
+// O cartão aparece nos últimos 40 s (os créditos), ou no fim.
+const proximoNaTela = computed(() => !!proximo.value && !dispensado.value && temDuracao.value && faltaParaOFim(tempo.value, duracaoTotal.value) <= 40)
+const rotuloDoProximo = computed(() => (proximo.value ? `T${proximo.value.temporada} E${proximo.value.numero}${proximo.value.titulo ? ` · ${proximo.value.titulo}` : ''}` : ''))
+
+function irParaOProximo() {
+  const p = proximo.value
+  if (!p) return
+  clearInterval(relogioDaContagem)
+  guardarProgresso()
+  passagem.telaCheia = !!document.fullscreenElement
+  const titulo = nomeDaSerie.value ? `${nomeDaSerie.value} T${p.temporada} E${p.numero}` : `T${p.temporada} E${p.numero}`
+  location.hash = rotaDoPlayer(`episodio:${p.id}`, { titulo, posicao: p.posicao || 0 })
+}
+
+function dispensarProximo() {
+  dispensado.value = true
+  clearInterval(relogioDaContagem)
+  contagem.value = 0
+}
+
+function aoAcabar() {
+  controles.value = true
+  if (!proximo.value || dispensado.value) return
+  contagem.value = 10
+  clearInterval(relogioDaContagem)
+  relogioDaContagem = setInterval(() => {
+    if (--contagem.value <= 0) irParaOProximo()
+  }, 1000)
 }
 
 // ---------- Progresso ----------
@@ -684,6 +753,7 @@ watch(gaveta, (g) => {
 
 onMounted(() => {
   if (aoVivo) carregarAlternativas()
+  carregarProximo()
   abrir()
   carregarTelas()
   relogioDoProgresso = setInterval(guardarProgresso, 10000)
@@ -715,19 +785,21 @@ onBeforeUnmount(() => {
   clearTimeout(esperaDaTentativa)
   clearTimeout(esconderControles)
   clearTimeout(cliqueAdiado)
+  clearInterval(relogioDaContagem)
   limparTravado()
   document.removeEventListener('visibilitychange', aoEsconder)
   document.removeEventListener('fullscreenchange', aoMudarTelaCheia)
   window.removeEventListener('pagehide', aoEsconder)
   window.removeEventListener('keydown', aoTeclar)
   guardarProgresso(true)
-  if (document.fullscreenElement) document.exitFullscreen().catch(() => {})
+  if (document.fullscreenElement && !passagem.telaCheia) document.exitFullscreen().catch(() => {})
+  passagem.telaCheia = false
   soltarVideo()
 })
 </script>
 
 <template>
-  <div ref="caixa" class="player" :class="{ 'ao-vivo': aoVivo, 'sem-controles': !controles, 'tela-cheia': telaCheia }" @pointermove="mostrarControles">
+  <div ref="caixa" class="player" :class="{ 'ao-vivo': aoVivo, 'sem-controles': !controles, 'tela-cheia': telaCheia }" @pointermove="aoMexer">
     <div class="palco" @pointerup="tocouNoPalco">
       <video
         ref="video"
@@ -743,7 +815,7 @@ onBeforeUnmount(() => {
         @timeupdate="aoAndar"
         @progress="aoCarregarMais"
         @error="falhou"
-        @ended="controles = true"
+        @ended="aoAcabar"
       >
         <track
           v-if="legenda"
@@ -766,6 +838,18 @@ onBeforeUnmount(() => {
       <button v-else-if="estado === 'pausado' && controles" class="grande" aria-label="Tocar" @click="alternarPlay"><Icone nome="tocar" /></button>
       <div v-if="pulo" class="pulo" :class="pulo.lado" aria-hidden="true">{{ pulo.texto }}</div>
 
+      <!-- Próximo episódio: nos créditos, no canto; no fim, conta 10 s e vai sozinho. -->
+      <div v-if="proximoNaTela" class="proximo-episodio" role="status">
+        <p class="rotulo-do-proximo">Próximo episódio</p>
+        <p class="nome-do-proximo">{{ rotuloDoProximo }}</p>
+        <div class="linha-acoes">
+          <button class="botao principal" @click="irParaOProximo">
+            <Icone nome="tocar" />{{ contagem > 0 ? `Assistir em ${contagem} s` : 'Assistir agora' }}
+          </button>
+          <button class="botao" @click="dispensarProximo">{{ contagem > 0 ? 'Cancelar' : 'Agora não' }}</button>
+        </div>
+      </div>
+
       <!-- Avisos discretos no alto -->
       <div v-if="puxandoAudio" class="aviso-no-alto">
         <span>Puxando o áudio da assinatura para gerar a legenda (uns 15 s). O vídeo volta sozinho do mesmo ponto.</span>
@@ -777,7 +861,7 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- Controles -->
-      <header class="topo controles-do-player">
+      <header class="topo controles-do-player" @pointerdown="aoTocarNosControles">
         <button class="botao icone" aria-label="Voltar" @click="voltar('#/inicio')"><Icone nome="voltar" /></button>
         <div class="nome-do-video">
           <span class="titulo">{{ nome }}</span>
@@ -797,7 +881,7 @@ onBeforeUnmount(() => {
         </button>
       </header>
 
-      <footer class="base controles-do-player">
+      <footer class="base controles-do-player" @pointerdown="aoTocarNosControles">
         <div
           v-if="temDuracao"
           ref="trilho"
@@ -839,6 +923,7 @@ onBeforeUnmount(() => {
             <span class="ponto"></span>{{ atrasado ? 'Voltar ao vivo' : 'Ao vivo' }}
           </button>
           <span class="espaco"></span>
+          <button v-if="proximo" class="botao icone" :aria-label="`Próximo episódio: ${rotuloDoProximo}`" :title="`Próximo: ${rotuloDoProximo}`" @click="irParaOProximo"><Icone nome="proximo" /></button>
           <button v-if="velocidade !== 1" class="botao fino" title="Velocidade" @click="gaveta = 'opcoes'">{{ String(velocidade).replace('.', ',') }}×</button>
           <button class="botao icone" aria-label="Atualizar" title="Atualizar (abre o vídeo de novo)" @click="recarregar"><Icone nome="atualizar" /></button>
           <button v-if="temPip" class="botao icone" aria-label="Picture-in-Picture" title="Picture-in-Picture" @click="alternarPip"><Icone nome="pip" /></button>
@@ -1307,6 +1392,44 @@ video::cue {
 
 .pulo.direita {
   right: 12%;
+}
+
+/* ---------- Próximo episódio ---------- */
+
+.proximo-episodio {
+  position: absolute;
+  right: max(16px, env(safe-area-inset-right));
+  bottom: 96px;
+  z-index: 3;
+  width: min(320px, calc(100% - 32px));
+  padding: 14px 16px;
+  border: 1px solid var(--linha);
+  border-radius: var(--raio);
+  background: rgb(22 24 29 / 94%);
+}
+
+.proximo-episodio p {
+  margin: 0;
+}
+
+.rotulo-do-proximo {
+  color: var(--texto-fraco);
+  font-size: 0.75rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.nome-do-proximo {
+  margin: 2px 0 12px !important;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.proximo-episodio .botao:not(.principal) {
+  border-color: rgb(255 255 255 / 25%);
+  background: transparent;
+  color: #ffffff;
 }
 
 /* ---------- Cartões de problema ---------- */

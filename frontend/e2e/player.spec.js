@@ -103,3 +103,45 @@ test('ao vivo: versões do canal, a melhor indicada, e trocar sem sair', async (
   await expect(page).toHaveURL(/canal:102/)
   await expect(page.locator('.subtitulo')).toContainText('SD · reserva')
 })
+
+test.describe('no celular', () => {
+  test.use({ hasTouch: true, viewport: { width: 390, height: 844 } })
+
+  // Um toque mostra os controles e eles ficam uns 5 s (antes, o mesmo toque mostrava e escondia).
+  test('um toque mostra os controles, e eles ficam tempo para usar', async ({ page }) => {
+    await entregarVideo(page, '**/api/video/filme/200.mp4')
+    await page.goto('/#/assistir/filme:200?titulo=Filme%20de%20teste')
+    const player = page.locator('.player')
+    await expect(player).toHaveClass(/sem-controles/, { timeout: 8000 }) // tocando, somem sozinhos
+    // O Chrome do Android solta um pointermove de toque junto com o toque.
+    await player.dispatchEvent('pointermove', { pointerType: 'touch', bubbles: true })
+    await page.locator('video').tap()
+    await expect(player).not.toHaveClass(/sem-controles/)
+    await page.waitForTimeout(3500)
+    await expect(player).not.toHaveClass(/sem-controles/)
+    await expect(page.getByRole('button', { name: 'Tela cheia' })).toBeVisible()
+    await expect(player).toHaveClass(/sem-controles/, { timeout: 4000 })
+    // Outro toque, com os controles à vista, esconde.
+    await page.locator('video').tap()
+    await expect(player).not.toHaveClass(/sem-controles/)
+    await page.locator('video').tap()
+    await expect(player).toHaveClass(/sem-controles/)
+  })
+})
+
+test('próximo episódio: aparece nos créditos e abre o seguinte', async ({ page }) => {
+  await entregarVideo(page, '**/api/video/episodio/*.mp4')
+  await page.route('**/api/episodios/301/proximo', (r) =>
+    r.fulfill({ json: { serie: 'Série de Teste', proximo: { id: 302, temporada: 1, numero: 2, titulo: 'O meio', posicao: 0 } } }),
+  )
+  await page.route('**/api/episodios/302/proximo', (r) => r.fulfill({ json: { serie: 'Série de Teste', proximo: null } }))
+  await page.goto('/#/assistir/episodio:301?titulo=S%C3%A9rie%20de%20Teste%20T1%20E1')
+  await expect(page.getByRole('button', { name: /Próximo episódio: T1 E2 · O meio/ })).toBeVisible()
+  // O vídeo tem 40 s: já está "nos créditos".
+  const cartao = page.locator('.proximo-episodio')
+  await expect(cartao).toContainText('T1 E2 · O meio')
+  await cartao.getByRole('button', { name: 'Assistir agora' }).click()
+  await expect(page).toHaveURL(/episodio:302/)
+  await expect(page.locator('.titulo')).toHaveText('Série de Teste T1 E2')
+  await expect(page.locator('.proximo-episodio')).toHaveCount(0)
+})

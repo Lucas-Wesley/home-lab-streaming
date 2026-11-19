@@ -45,3 +45,11 @@ export function folgaCarregada(buffered, agora) {
   }
   return 0
 }
+
+// Segundos até o fim do vídeo (nunca negativo).
+export function faltaParaOFim(agora, duracao) {
+  return Number.isFinite(duracao) && duracao > 0 ? Math.max(0, duracao - agora) : Infinity
+}
+
+// Passa de um player para o próximo (o do episódio seguinte): manter a tela cheia.
+export const passagem = { telaCheia: false }

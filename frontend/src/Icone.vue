@@ -119,6 +119,10 @@ defineProps({ nome: { type: String, required: true } })
       <circle cx="15" cy="7" r="2" />
       <circle cx="9" cy="17" r="2" />
     </template>
+    <template v-else-if="nome === 'proximo'">
+      <path d="M6 5.5v13l9.5-6.5z" fill="currentColor" />
+      <path d="M18 5.5v13" stroke-width="2.2" />
+    </template>
     <path v-else-if="nome === 'atualizar'" d="M19.5 12a7.5 7.5 0 11-2.2-5.3M19.5 4.5v4h-4" />
   </svg>
 </template>

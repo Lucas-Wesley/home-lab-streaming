@@ -3,7 +3,7 @@
 App do **ecossistema de apps pessoais do Lucas**: central de streaming (canais, filmes e séries de uma assinatura
 IPTV) com o celular como controle remoto da TV e do projetor.
 
-**Comece lendo:** [`docs/DECISOES.md`](docs/DECISOES.md) — estado atual, decisões (S1–S48) e próximos passos.
+**Comece lendo:** [`docs/DECISOES.md`](docs/DECISOES.md) — estado atual, decisões (S1–S49) e próximos passos.
 
 ## Em uma frase
 O servidor guarda o acesso e o catálogo, repassa o vídeo do provedor (para o PWA em `/api/video`, para as telas em
@@ -56,6 +56,10 @@ Mesma infraestrutura e mesmo design system (`docs/DESIGN-SYSTEM.md`) das outras 
 - **Legenda dupla** (S46, `legenda_dupla.go`): uma gravação por vez, com `nice`. Nos testes, o ffmpeg do Mac não tem
   libass: `queimarLegenda = false` (o vídeo sai sem a legenda). A fonte da imagem é Liberation Sans (`font-liberation`
   no Dockerfile).
+- **Flashcards de um título** (S49, `frases_para_flashcards.go`): a proposta vai ao Flashcards por `POST /api/propostas` e os
+  áudios por `POST /api/geracoes/{id}/audios` (F45 de lá): mudar um lado é mudar o outro. A fonte de cada cartão (o link da
+  fala) identifica a frase nos dois apps. O áudio da assinatura só com a conexão livre (`fonteDoAudio`). Nos testes,
+  `novoFlashcardsFalso` e `openSubtitlesDasFrases`.
 - **Títulos para verificar** (S37): o Lucas manda títulos estranhos pelo menu ⋯ da página do título. Quando ele
   pedir para "verificar os títulos reportados", seguir [`docs/PARA-VERIFICAR.md`](docs/PARA-VERIFICAR.md).
 - **Commits:** autoria do Lucas; **sem linha `Co-Authored-By`**.

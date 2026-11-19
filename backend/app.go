@@ -72,6 +72,8 @@ type app struct {
 	legendasAcordar chan struct{}
 	// Documentários para o Acervo (S41): o trabalhador dos envios acorda por aqui.
 	enviosAcordar chan struct{}
+	// Flashcards de um título (S49): a fila das frases acorda por aqui.
+	frasesAcordar chan struct{}
 	// Meus vídeos (S42): a fila do Telegram acorda por aqui.
 	telegramAcordar chan struct{}
 	// Legenda dupla (S46): a gravação de um vídeo por vez.
@@ -103,6 +105,7 @@ func novoApp(db *sql.DB, cfg config) (*app, error) {
 		legendasAcordar:              make(chan struct{}, 1),
 		enviosAcordar:                make(chan struct{}, 1),
 		telegramAcordar:              make(chan struct{}, 1),
+		frasesAcordar:                make(chan struct{}, 1),
 		liberarParaOAudio:            map[string]bool{},
 		segredo:                      segredo,
 		agora:                        time.Now,

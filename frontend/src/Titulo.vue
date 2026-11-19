@@ -3,6 +3,7 @@ import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Andamento from './Andamento.vue'
 import BotaoFavorito from './BotaoFavorito.vue'
 import Folha from './Folha.vue'
+import { andandoAsFrases, estadoDasFrases, podeRefazerAudios } from './frasesDoTitulo.js'
 import Icone from './Icone.vue'
 import OpcaoDaAssinatura from './OpcaoDaAssinatura.vue'
 import OpcaoDeTorrent from './OpcaoDeTorrent.vue'
@@ -450,6 +451,63 @@ async function medirIngles(ia = false) {
   }
 }
 
+// Flashcards de um título (S49): as melhores frases em inglês vão ao Flashcards como uma proposta, que
+// o Lucas escuta e aprova lá; o áudio de cada frase é cortado do vídeo depois, com a conexão livre.
+const frases = ref(null) // { disponivel, limite, pedido }
+const folhaDeFrases = ref(false)
+const limiteDeFrases = ref(40)
+const temporadaDasFrases = ref(1)
+const episodioDasFrases = ref(1)
+const gerandoFrases = ref(false)
+const pedidoDeFrases = computed(() => frases.value?.pedido || null)
+const estadoDoPedido = computed(() => estadoDasFrases(pedidoDeFrases.value))
+let relogioDasFrases = 0
+onBeforeUnmount(() => clearTimeout(relogioDasFrases))
+
+async function carregarFrases() {
+  clearTimeout(relogioDasFrases)
+  const ep = ehSerie ? `?temporada=${temporadaDasFrases.value}&episodio=${episodioDasFrases.value}` : ''
+  try {
+    frases.value = await api(`/api/titulos/${tipo}/${id}/flashcards${ep}`)
+  } catch {
+    return
+  }
+  if (folhaDeFrases.value && andandoAsFrases(pedidoDeFrases.value)) relogioDasFrases = setTimeout(carregarFrases, 4000)
+}
+
+function abrirFrases() {
+  menuAberto.value = false
+  if (ehSerie && temporada.value > 0) temporadaDasFrases.value = temporada.value
+  folhaDeFrases.value = true
+  carregarFrases()
+}
+
+async function gerarFrases() {
+  gerandoFrases.value = true
+  try {
+    const p = await api(`/api/titulos/${tipo}/${id}/flashcards`, {
+      metodo: 'POST',
+      corpo: { limite: Number(limiteDeFrases.value) || 40, temporada: temporadaDasFrases.value, episodio: episodioDasFrases.value },
+    })
+    frases.value = { ...frases.value, pedido: p }
+    carregarFrases()
+  } catch (e) {
+    recado(e.message, true)
+  } finally {
+    gerandoFrases.value = false
+  }
+}
+
+async function refazerAudios() {
+  try {
+    const p = await api(`/api/titulos/${tipo}/${id}/flashcards/audios`, { metodo: 'POST', corpo: { temporada: temporadaDasFrases.value, episodio: episodioDasFrases.value } })
+    frases.value = { ...frases.value, pedido: p }
+    carregarFrases()
+  } catch (e) {
+    recado(e.message, true)
+  }
+}
+
 // Salvar busca (S44): a página do título é a busca dele; volta aqui pelas Buscas salvas do Início.
 async function salvarEstaBusca() {
   menuAberto.value = false
@@ -497,6 +555,7 @@ onMounted(async () => {
   carregarAssinatura()
   carregarInformacoes()
   carregarIngles()
+  carregarFrases()
   if (ehDocumentario.value) carregarAcervo()
   api(`/api/titulos/${tipo}/${id}/onde`, { tempo: 20000 })
     .then((l) => (outrosServicos.value = l))
@@ -521,6 +580,7 @@ onMounted(async () => {
             <button v-if="ehDocumentario && acervo.disponivel" role="menuitem" @click="abrirAcervo">Mandar para o Acervo</button>
             <button role="menuitem" @click="abrirRelato">Mandar para verificação</button>
             <button role="menuitem" @click="salvarEstaBusca">Salvar busca</button>
+            <button v-if="frases?.disponivel && titulo.idioma === 'en'" role="menuitem" @click="abrirFrases">Gerar flashcards</button>
             <button v-if="podePesquisar" role="menuitem" :disabled="pesquisando" @click="buscarInformacoes">{{ informacoes ? 'Pesquisar de novo' : 'Buscar mais informações' }}</button>
           </div>
         </template>
@@ -699,6 +759,42 @@ onMounted(async () => {
       </form>
     </Folha>
 
+    <Folha v-if="folhaDeFrases" titulo="Flashcards deste título" @fechar="folhaDeFrases = false">
+      <div class="frases">
+        <p class="suave">
+          As melhores frases em inglês do dia a dia vão ao Flashcards, no baralho “Inglês · Filmes e séries”, para você escutar e aprovar lá. Ficam de fora frases
+          curtas, nomes, coisas só da história e o que já está nos seus baralhos de inglês. O áudio de cada frase é cortado do vídeo depois, quando a conexão estiver livre.
+        </p>
+        <div class="campos-frases">
+          <label v-if="ehSerie">
+            <span class="rotulo-campo">Temporada</span>
+            <input v-model.number="temporadaDasFrases" class="campo" type="number" min="1" aria-label="Temporada" @change="carregarFrases" />
+          </label>
+          <label v-if="ehSerie">
+            <span class="rotulo-campo">Episódio</span>
+            <input v-model.number="episodioDasFrases" class="campo" type="number" min="1" aria-label="Episódio" @change="carregarFrases" />
+          </label>
+          <label>
+            <span class="rotulo-campo">Até quantas frases</span>
+            <input v-model.number="limiteDeFrases" class="campo" type="number" min="1" max="100" aria-label="Até quantas frases" />
+          </label>
+        </div>
+        <div class="linha-acoes">
+          <button class="botao principal" :disabled="gerandoFrases || andandoAsFrases(pedidoDeFrases) && pedidoDeFrases.estado !== 'enviado'" @click="gerarFrases">
+            {{ pedidoDeFrases ? 'Gerar de novo' : 'Gerar flashcards' }}
+          </button>
+        </div>
+        <div v-if="pedidoDeFrases" class="pedido-de-frases">
+          <span class="estado-envio" :class="estadoDoPedido.classe">{{ estadoDoPedido.rotulo }}</span>
+          <span v-if="estadoDoPedido.detalhe" class="suave via">{{ estadoDoPedido.detalhe }}</span>
+          <span class="acoes-envio">
+            <a v-if="pedidoDeFrases.link" :href="pedidoDeFrases.link" target="_blank" rel="noopener">Abrir no Flashcards</a>
+            <button v-if="podeRefazerAudios(pedidoDeFrases)" class="link" @click="refazerAudios">Gerar os áudios que faltam</button>
+          </span>
+        </div>
+      </div>
+    </Folha>
+
     <Folha v-if="folhaDoAcervo" titulo="Mandar para o Acervo" @fechar="folhaDoAcervo = false">
       <div class="acervo">
         <p class="suave">
@@ -845,8 +941,38 @@ onMounted(async () => {
   background: var(--linha);
 }
 
-.acervo p {
+.acervo p,
+.frases > p {
   margin: 0 0 12px;
+}
+
+.campos-frases {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.campos-frases label {
+  display: grid;
+  gap: 6px;
+  width: 9rem;
+}
+
+.rotulo-campo {
+  color: var(--texto-suave);
+  font-size: 0.82rem;
+  font-weight: 500;
+}
+
+.pedido-de-frases {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: baseline;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--linha);
 }
 
 .envios {

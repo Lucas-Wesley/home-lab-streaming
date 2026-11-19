@@ -12,12 +12,15 @@ import (
 	"time"
 )
 
-// flashcardsFalso imita a API do app Flashcards: baralhos e criar nota.
+// flashcardsFalso imita a API do app Flashcards: baralhos, notas, áudios e as propostas prontas (S49).
 type flashcardsFalso struct {
-	mu       sync.Mutex
-	baralhos []map[string]string
-	notas    map[string]map[string]string
-	audios   map[string][]byte
+	mu        sync.Mutex
+	baralhos  []map[string]string
+	notas     map[string]map[string]string
+	audios    map[string][]byte
+	propostas []map[string]any
+	// Os áudios que chegaram para a proposta, na ordem.
+	audiosDaProposta []map[string]string
 }
 
 func novoFlashcardsFalso(t *testing.T, baralhos ...string) *flashcardsFalso {
@@ -63,6 +66,39 @@ func novoFlashcardsFalso(t *testing.T, baralhos ...string) *flashcardsFalso {
 		nome := fmt.Sprintf("%032d.mp3", len(f.audios))
 		f.audios[nome] = b
 		json.NewEncoder(w).Encode(map[string]string{"nome": nome})
+	})
+	mux.HandleFunc("GET /api/notas", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		lista := []map[string]string{}
+		for _, n := range f.notas {
+			if n["baralho_id"] == r.URL.Query().Get("baralho") {
+				lista = append(lista, n)
+			}
+		}
+		json.NewEncoder(w).Encode(lista)
+	})
+	mux.HandleFunc("POST /api/propostas", func(w http.ResponseWriter, r *http.Request) {
+		var p map[string]any
+		json.NewDecoder(r.Body).Decode(&p)
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.propostas = append(f.propostas, p)
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprintf(w, `{"id":%d}`, 40+len(f.propostas))
+	})
+	mux.HandleFunc("POST /api/geracoes/{id}/audios", func(w http.ResponseWriter, r *http.Request) {
+		var corpo struct {
+			Audios []map[string]string `json:"audios"`
+		}
+		json.NewDecoder(r.Body).Decode(&corpo)
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		for _, a := range corpo.Audios {
+			a["geracao"] = r.PathValue("id")
+			f.audiosDaProposta = append(f.audiosDaProposta, a)
+		}
+		fmt.Fprint(w, `{"guardados":0}`)
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)

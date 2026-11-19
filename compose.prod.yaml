@@ -27,6 +27,8 @@ services:
       - host.docker.internal:host-gateway
     volumes:
       - /srv/data/streaming:/data
+      # Meus vídeos (cursos do Telegram) no SSD externo, montado na VM em /srv/ssd (S54).
+      - /srv/ssd/meus-videos:/data/meus-videos
       # A conta do Claude escolhida no Hub (H11 do Hub), lida a cada chamada; só leitura.
       - /srv/data/claude/ativa:/claude:ro
     networks:

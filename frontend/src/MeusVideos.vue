@@ -5,6 +5,7 @@ import Folha from './Folha.vue'
 import Icone from './Icone.vue'
 import { api } from './api.js'
 import { chaveDoSalvo, linkDoTelegram } from './meusVideos.js'
+import { acharPasta, aulasPedidas, montarArvore, oQueFalta, soDoDisco } from './pastas.js'
 import { tamanho } from './tamanho.js'
 import { duracao, relogio } from './tempo.js'
 
@@ -35,14 +36,73 @@ const pastas = computed(() => {
   const nomes = new Set((dados.value?.videos || []).map((v) => v.pasta))
   return [...nomes].sort((a, b) => a.localeCompare(b, 'pt-BR'))
 })
-// Sem pasta na rota, a página mostra só as pastas; os vídeos aparecem ao abrir uma.
-const grupos = computed(() =>
-  pastas.value.map((p) => {
-    const videos = dados.value.videos.filter((v) => v.pasta === p)
-    return { pasta: p, videos, tamanho: videos.reduce((soma, v) => soma + (v.tamanho || 0), 0) }
-  }),
+// Pastas em árvore (S55): o disco junto com o catálogo dos grupos salvos, para a estrutura de um
+// curso (curso › módulo › aula) aparecer inteira, com o que já baixou e o que falta.
+const arvore = computed(() => montarArvore(dados.value?.videos || [], dados.value?.salvos || []))
+const pastaAtual = computed(() => (props.pasta ? acharPasta(arvore.value, props.pasta) : arvore.value))
+const caminhoAtual = computed(() => {
+  const nomes = props.pasta.split('/').filter(Boolean)
+  return nomes.map((nome, i) => ({ nome, caminho: nomes.slice(0, i + 1).join('/') }))
+})
+const pedidas = computed(() => aulasPedidas(dados.value?.pedidos || []))
+const estaPedida = (a) => pedidas.value.has(a.chave) || pedidas.value.has(`${a.link}#*`)
+// O que falta baixar nesta pasta, sem o que já está na fila.
+const faltaAqui = computed(() =>
+  pastaAtual.value
+    ? oQueFalta(pastaAtual.value)
+        .map((p) => {
+          const mensagens = p.mensagens.filter((m) => !pedidas.value.has(`${p.link}#${m}`) && !pedidas.value.has(`${p.link}#*`))
+          return { ...p, mensagens }
+        })
+        .filter((p) => p.mensagens.length)
+    : [],
 )
-const daPasta = computed(() => (props.pasta ? (dados.value?.videos || []).filter((v) => v.pasta === props.pasta) : []))
+const aulasQueFaltam = computed(() => faltaAqui.value.reduce((soma, p) => soma + p.mensagens.length, 0))
+const naFilaAqui = computed(() => (pastaAtual.value ? pastaAtual.value.total - pastaAtual.value.baixadas - aulasQueFaltam.value : 0))
+const baixandoAulas = ref(false)
+const quantasAulas = (n) => `${n} ${n === 1 ? 'aula' : 'aulas'}`
+
+function resumoDaPasta(p) {
+  const partes = [p.total === p.baixadas ? quantos(p.total) : quantasAulas(p.total)]
+  if (p.baixadas && p.baixadas < p.total) partes.push(`${p.baixadas} ${p.baixadas === 1 ? 'baixada' : 'baixadas'}`)
+  if (p.baixadas === 0 && p.total) partes.push('nada baixado')
+  if (p.tamanho) partes.push(`${tamanho(p.tamanho)} no servidor`)
+  if (p.falta) partes.push(`faltam ${tamanho(p.falta)}`)
+  return partes.join(' · ')
+}
+
+// Baixar aulas do catálogo: um pedido por grupo do Telegram, só com as mensagens escolhidas. Cada
+// aula vai para a pasta do curso e do módulo dela (o servidor lê o caminho no texto da mensagem).
+async function baixarAulas(lista) {
+  baixandoAulas.value = true
+  try {
+    for (const p of lista) {
+      await api('/api/meus-videos/telegram', { metodo: 'POST', corpo: { link: p.link, tudo: true, pasta: p.grupo, mensagens: p.mensagens } })
+    }
+    const n = lista.reduce((soma, p) => soma + p.mensagens.length, 0)
+    recado(`${quantasAulas(n)} na fila: o servidor baixa uma por vez e cada uma aparece aqui ao terminar.`)
+    await carregar()
+  } catch (e) {
+    recado(e.message, true)
+  } finally {
+    baixandoAulas.value = false
+  }
+}
+
+const baixarAula = (a) => baixarAulas([{ link: a.link, grupo: a.grupo, mensagens: [a.mensagem] }])
+
+// A lixeira da pasta: apaga do servidor as aulas baixadas dela e das subpastas. As do Telegram
+// continuam no catálogo, para baixar de novo.
+async function apagarPasta(p) {
+  if (!confirm(`Apagar do servidor as ${p.baixadas} aulas baixadas de "${p.nome}" (${tamanho(p.tamanho)})? As do Telegram continuam aqui para baixar de novo.`)) return
+  try {
+    const r = await api('/api/meus-videos/apagar-pasta', { metodo: 'POST', corpo: { pasta: p.caminho.join('/') } })
+    recado(`${r.apagados} apagadas: ${tamanho(r.liberado)} livres de novo.`)
+    await carregar()
+  } catch (e) {
+    recado(e.message, true)
+  }
+}
 const pedidos = computed(() => (dados.value?.pedidos || []).filter((p) => p.estado !== 'pronto' || recente(p)))
 const andando = computed(() => pedidos.value.some((p) => p.estado === 'na fila' || p.estado === 'baixando'))
 
@@ -437,15 +497,15 @@ onBeforeUnmount(() => clearInterval(relogioDaFila))
       Nenhum vídeo ainda. Toque em <strong>Baixar do Telegram</strong> e cole o link de uma mensagem com vídeo.
     </p>
 
-    <section v-if="!pasta && grupos.length">
-      <p class="rotulo">Pastas <span class="quantos">{{ grupos.length }}</span></p>
+    <section v-if="!pasta && arvore.pastas.length">
+      <p class="rotulo">Pastas <span class="quantos">{{ arvore.pastas.length }}</span></p>
       <ul class="lista pastas">
-        <li v-for="g in grupos" :key="g.pasta">
-          <button class="abrir-salvo pedido" @click="irParaPasta(g.pasta)">
+        <li v-for="g in arvore.pastas" :key="g.nome">
+          <button class="abrir-salvo pedido" @click="irParaPasta(g.caminho.join('/'))">
             <span class="icone-do-salvo"><Icone nome="pasta" /></span>
             <span class="texto">
-              <span class="nome-do-pedido">{{ g.pasta }}</span>
-              <span class="meta">{{ quantos(g.videos.length) }}{{ g.tamanho ? ` · ${tamanho(g.tamanho)}` : '' }}</span>
+              <span class="nome-do-pedido">{{ g.nome }}</span>
+              <span class="meta">{{ resumoDaPasta(g) }}</span>
             </span>
             <Icone nome="avancar" class="seta" />
           </button>
@@ -454,21 +514,79 @@ onBeforeUnmount(() => clearInterval(relogioDaFila))
     </section>
 
     <section v-if="pasta">
-      <button class="voltar-as-pastas" @click="irParaPasta('')"><Icone nome="voltar" /> Pastas</button>
-      <p class="rotulo">{{ pasta }} <span class="quantos">{{ daPasta.length }}</span></p>
-      <p v-if="dados && !daPasta.length" class="vazio">Nenhum vídeo nesta pasta.</p>
-      <ul class="grade">
-        <li v-for="v in daPasta" :key="v.id">
-          <button class="cartaz" @click="abrir(v)">
-            <span class="capa" :data-inicial="v.nome.slice(0, 1)">
-              <img v-if="v.capa" :src="v.capa" alt="" loading="lazy" @error="semImagem" />
-              <span v-if="v.duracao" class="tempo">{{ relogio(v.duracao) }}</span>
-              <span v-if="v.posicao && v.duracao" class="visto" :style="{ width: `${Math.min(100, (v.posicao / v.duracao) * 100)}%` }" />
-            </span>
-            <span class="nome">{{ v.nome }}</span>
-          </button>
-        </li>
-      </ul>
+      <nav class="caminho-da-pasta" aria-label="Onde estou">
+        <button class="voltar-as-pastas" @click="irParaPasta('')"><Icone nome="voltar" /> Pastas</button>
+        <template v-for="(c, i) in caminhoAtual.slice(0, -1)" :key="c.caminho">
+          <span class="separador" aria-hidden="true">›</span>
+          <button class="voltar-as-pastas" :title="c.nome" @click="irParaPasta(c.caminho)">{{ c.nome }}</button>
+        </template>
+      </nav>
+      <p v-if="dados && !pastaAtual" class="vazio">Esta pasta não existe mais.</p>
+      <template v-else-if="pastaAtual">
+        <div class="cabeca-da-pasta">
+          <h2 class="nome-da-pasta">{{ pastaAtual.nome }}</h2>
+          <p class="meta">{{ resumoDaPasta(pastaAtual) }}<template v-if="naFilaAqui > 0"> · {{ naFilaAqui }} na fila</template></p>
+          <div v-if="aulasQueFaltam || pastaAtual.baixadas" class="linha-acoes">
+            <button v-if="aulasQueFaltam" class="botao principal" :disabled="baixandoAulas || !dados.telegram.instalado" @click="baixarAulas(faltaAqui)">
+              {{ baixandoAulas ? 'Mandando…' : `Baixar ${aulasQueFaltam === pastaAtual.total ? 'tudo' : 'o que falta'} (${quantasAulas(aulasQueFaltam)} · ${tamanho(faltaAqui.reduce((s, p) => s + p.tamanho, 0))})` }}
+            </button>
+            <button v-if="pastaAtual.baixadas" class="botao perigo" @click="apagarPasta(pastaAtual)"><Icone nome="lixeira" />Apagar as baixadas</button>
+          </div>
+        </div>
+
+        <ul v-if="pastaAtual.pastas.length" class="lista pastas">
+          <li v-for="g in pastaAtual.pastas" :key="g.nome">
+            <button class="abrir-salvo pedido" @click="irParaPasta(g.caminho.join('/'))">
+              <span class="icone-do-salvo"><Icone nome="pasta" /></span>
+              <span class="texto">
+                <span class="nome-do-pedido">{{ g.nome }}</span>
+                <span class="meta">{{ resumoDaPasta(g) }}</span>
+              </span>
+              <Icone nome="avancar" class="seta" />
+            </button>
+          </li>
+        </ul>
+
+        <ul v-if="pastaAtual.aulas.length && soDoDisco(pastaAtual)" class="grade">
+          <li v-for="a in pastaAtual.aulas" :key="a.chave">
+            <button class="cartaz" @click="abrir(a.video)">
+              <span class="capa" :data-inicial="a.nome.slice(0, 1)">
+                <img v-if="a.video.capa" :src="a.video.capa" alt="" loading="lazy" @error="semImagem" />
+                <span v-if="a.video.duracao" class="tempo">{{ relogio(a.video.duracao) }}</span>
+                <span v-if="a.video.posicao && a.video.duracao" class="visto" :style="{ width: `${Math.min(100, (a.video.posicao / a.video.duracao) * 100)}%` }" />
+              </span>
+              <span class="nome">{{ a.nome }}</span>
+            </button>
+          </li>
+        </ul>
+        <ul v-else-if="pastaAtual.aulas.length" class="lista aulas">
+          <li v-for="a in pastaAtual.aulas" :key="a.chave">
+            <div class="pedido aula" :class="{ falta: !a.video }">
+              <button v-if="a.video" class="abrir-salvo" @click="abrir(a.video)">
+                <span class="mini-capa capa" :data-inicial="a.nome.slice(0, 1)">
+                  <img v-if="a.video.capa" :src="a.video.capa" alt="" loading="lazy" @error="semImagem" />
+                  <span v-if="a.video.posicao && a.video.duracao" class="visto" :style="{ width: `${Math.min(100, (a.video.posicao / a.video.duracao) * 100)}%` }" />
+                </span>
+                <span class="texto">
+                  <span class="nome-do-pedido">{{ a.nome }}</span>
+                  <span class="meta">{{ [duracao(a.duracao), tamanho(a.video.tamanho)].filter(Boolean).join(' · ') }}</span>
+                </span>
+                <Icone nome="tocar" class="seta" />
+              </button>
+              <template v-else>
+                <span class="mini-capa vazia" aria-hidden="true"><Icone nome="tocar" /></span>
+                <span class="texto">
+                  <span class="nome-do-pedido">{{ a.nome }}</span>
+                  <span class="meta">{{ [duracao(a.duracao), tamanho(a.tamanho), 'no Telegram'].filter(Boolean).join(' · ') }}</span>
+                </span>
+                <span v-if="estaPedida(a)" class="chip andando">na fila</span>
+                <button v-else class="botao" :disabled="baixandoAulas || !dados.telegram.instalado" @click="baixarAula(a)">Baixar</button>
+              </template>
+            </div>
+          </li>
+        </ul>
+        <p v-if="!pastaAtual.pastas.length && !pastaAtual.aulas.length" class="vazio">Nenhum vídeo nesta pasta.</p>
+      </template>
     </section>
 
     <Folha v-if="aberto" :titulo="aberto.nome" @fechar="aberto = null">
@@ -806,6 +924,66 @@ onBeforeUnmount(() => clearInterval(relogioDaFila))
   font: inherit;
   font-size: 0.9rem;
   cursor: pointer;
+}
+
+.caminho-da-pasta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
+}
+
+.caminho-da-pasta .voltar-as-pastas {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.separador {
+  color: var(--texto-fraco);
+}
+
+.cabeca-da-pasta {
+  display: grid;
+  gap: 6px;
+  margin: 6px 0 14px;
+}
+
+.nome-da-pasta {
+  margin: 0;
+  font-size: 1.25rem;
+  overflow-wrap: anywhere;
+}
+
+.cabeca-da-pasta .linha-acoes {
+  margin-top: 6px;
+}
+
+.mini-capa {
+  position: relative;
+  flex-shrink: 0;
+  width: 88px;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: var(--raio-p);
+  background: var(--superficie);
+}
+
+.mini-capa img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.mini-capa.vazia {
+  display: grid;
+  place-items: center;
+  color: var(--texto-fraco);
+}
+
+.aula.falta .nome-do-pedido {
+  color: var(--texto-suave);
 }
 
 .voltar-as-pastas:hover {

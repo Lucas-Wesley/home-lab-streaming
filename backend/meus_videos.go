@@ -80,18 +80,19 @@ type meuVideo struct {
 }
 
 type pedidoDoTelegram struct {
-	ID         int64  `json:"id"`
-	Link       string `json:"link"`
-	Nome       string `json:"nome"`
-	Pasta      string `json:"pasta"`
-	Tudo       bool   `json:"tudo"`
-	Estado     string `json:"estado"`
-	Mensagem   string `json:"mensagem,omitempty"`
-	Baixado    int64  `json:"baixado"`
-	Videos     int    `json:"videos"`
-	Total      int    `json:"total"`
-	Previsto   int64  `json:"previsto"`
-	CriadoEm   string `json:"criado_em"`
+	ID         int64   `json:"id"`
+	Link       string  `json:"link"`
+	Nome       string  `json:"nome"`
+	Pasta      string  `json:"pasta"`
+	Tudo       bool    `json:"tudo"`
+	Estado     string  `json:"estado"`
+	Mensagem   string  `json:"mensagem,omitempty"`
+	Baixado    int64   `json:"baixado"`
+	Videos     int     `json:"videos"`
+	Total      int     `json:"total"`
+	Previsto   int64   `json:"previsto"`
+	CriadoEm   string  `json:"criado_em"`
+	Mensagens  []int64 `json:"mensagens,omitempty"` // no grupo, as escolhidas (vazio: todas)
 	escolhidas map[int64]bool
 }
 
@@ -135,6 +136,17 @@ func limparNome(s string) string {
 	return s
 }
 
+// limparPasta: a pasta pode ter subpastas ("Curso/Módulo", S55); cada nível segue limparNome.
+func limparPasta(s string) string {
+	niveis := []string{}
+	for _, n := range strings.Split(strings.ReplaceAll(s, "\\", "/"), "/") {
+		if n = limparNome(n); n != "" {
+			niveis = append(niveis, n)
+		}
+	}
+	return strings.Join(niveis, "/")
+}
+
 // Links aceitos: https://t.me/c/123/45 (grupo privado), https://t.me/nome/45 (público) e os de
 // tópico (https://t.me/c/123/7/45). Com "tudo", basta o grupo.
 var reLinkDoTelegram = regexp.MustCompile(`^(?:https?://)?(?:t|telegram)\.me/(?:c/(\d+)|([A-Za-z][A-Za-z0-9_]{3,}))((?:/\d+){0,2})/?(?:\?.*)?$`)
@@ -169,22 +181,31 @@ func lerLinkDoTelegram(s string) (linkDoTelegram, bool) {
 func (a *app) sincronizarMeusVideos(ctx context.Context) error {
 	raiz := a.pastaDosMeusVideos()
 	noDisco := map[string]os.FileInfo{}
-	pastas, _ := os.ReadDir(raiz)
-	for _, p := range pastas {
-		if !p.IsDir() || strings.HasPrefix(p.Name(), ".") {
-			continue
+	// Pastas em qualquer nível (curso › módulo, S55); as que começam com ponto (.capas, .baixando)
+	// ficam de fora, e os arquivos soltos na raiz também (todo vídeo tem pasta).
+	filepath.WalkDir(raiz, func(caminho string, d os.DirEntry, err error) error {
+		if err != nil || caminho == raiz {
+			return nil
 		}
-		arquivos, _ := os.ReadDir(filepath.Join(raiz, p.Name()))
-		for _, f := range arquivos {
-			if f.IsDir() || strings.HasPrefix(f.Name(), ".") || !ehVideo(f.Name()) {
-				continue
+		if strings.HasPrefix(d.Name(), ".") {
+			if d.IsDir() {
+				return filepath.SkipDir
 			}
-			if info, err := f.Info(); err == nil {
-				// O macOS devolve os acentos decompostos (NFD); o banco guarda como foram escritos (NFC).
-				noDisco[norm.NFC.String(p.Name()+"/"+f.Name())] = info
-			}
+			return nil
 		}
-	}
+		if d.IsDir() || !ehVideo(d.Name()) {
+			return nil
+		}
+		rel, err := filepath.Rel(raiz, caminho)
+		if err != nil || !strings.Contains(rel, string(filepath.Separator)) {
+			return nil
+		}
+		if info, err := d.Info(); err == nil {
+			// O macOS devolve os acentos decompostos (NFD); o banco guarda como foram escritos (NFC).
+			noDisco[norm.NFC.String(filepath.ToSlash(rel))] = info
+		}
+		return nil
+	})
 	rows, err := a.db.QueryContext(ctx, `SELECT id, arquivo FROM meus_videos`)
 	if err != nil {
 		return err
@@ -209,7 +230,8 @@ func (a *app) sincronizarMeusVideos(ctx context.Context) error {
 		if _, ok := noBanco[arq]; ok {
 			continue
 		}
-		pasta, nome, _ := strings.Cut(arq, "/")
+		i := strings.LastIndex(arq, "/")
+		pasta, nome := arq[:i], arq[i+1:]
 		nome = strings.TrimSuffix(nome, filepath.Ext(nome))
 		if _, err := a.db.ExecContext(ctx, `INSERT INTO meus_videos (pasta, nome, arquivo, tamanho, criado_em) VALUES (?, ?, ?, ?, ?)`,
 			pasta, nome, arq, info.Size(), info.ModTime().UTC().Truncate(time.Second).Format(time.RFC3339)); err != nil {
@@ -408,6 +430,7 @@ func lerPedido(s interface{ Scan(...any) error }) (pedidoDoTelegram, error) {
 				p.escolhidas = map[int64]bool{}
 			}
 			p.escolhidas[id] = true
+			p.Mensagens = append(p.Mensagens, id)
 		}
 	}
 	return p, err
@@ -635,20 +658,68 @@ func nomeDoVideo(texto, arquivo string, data int64) string {
 	return primeiro(base, "Vídeo")
 }
 
+var (
+	reIndexadoPor = regexp.MustCompile(`(?i)\s*-?\s*indexado por @\S+\s*$`)
+	reAulaSemNome = regexp.MustCompile(`(?i)^(?:\d+\s*[.\-_)]?\s*)?(?:aula|v[ií]deo)(?:\s*\d+)?$`)
+)
+
+// aulaDaMensagem (S55): nos grupos de cursos, o texto de cada vídeo traz o caminho dele:
+//
+//	#F0003 aula
+//	002 - Bônus MBA                          ← curso ou módulo
+//	=001 - System design e requisitos        ← submódulo
+//	==002 - Plano de capacidade - Indexado por @canal   ← a aula, quando o arquivo não tem nome
+//
+// Devolve as pastas (até 3 níveis) e o nome. Nome genérico ("aula", "1. Aula") vira o último nível
+// do caminho. Sem a etiqueta na 1ª linha ou sem caminho, as pastas vêm vazias e o nome é o de
+// sempre (nomeDoVideo).
+func aulaDaMensagem(texto, arquivo string, data int64) ([]string, string) {
+	nome := nomeDoVideo(texto, arquivo, data)
+	linhas := []string{}
+	for _, l := range strings.Split(texto, "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			linhas = append(linhas, l)
+		}
+	}
+	if len(linhas) < 2 || !strings.HasPrefix(linhas[0], "#") || strings.HasPrefix(linhas[1], "#") {
+		return nil, nome
+	}
+	pastas := []string{}
+	for i, l := range linhas[1:] {
+		if i > 0 && !strings.HasPrefix(l, "=") {
+			break // o caminho acabou: o resto é descrição
+		}
+		if p := limparNome(reIndexadoPor.ReplaceAllString(strings.TrimLeft(l, "= "), "")); p != "" {
+			pastas = append(pastas, p)
+		}
+		if len(pastas) == 3 {
+			break
+		}
+	}
+	if len(pastas) == 0 {
+		return nil, nome
+	}
+	if ultimo := pastas[len(pastas)-1]; reAulaSemNome.MatchString(nome) || strings.EqualFold(nome, ultimo) {
+		nome, pastas = ultimo, pastas[:len(pastas)-1]
+	}
+	return pastas, nome
+}
+
 // jaBaixadas: as mensagens do grupo que já viraram vídeo aqui (pela origem).
-func (a *app) jaBaixadas(ctx context.Context, l linkDoTelegram) map[int64]bool {
-	ja := map[int64]bool{}
-	rows, err := a.db.QueryContext(ctx, `SELECT origem FROM meus_videos WHERE origem != ''`)
+func (a *app) jaBaixadas(ctx context.Context, l linkDoTelegram) map[int64]int64 {
+	ja := map[int64]int64{} // mensagem → id do vídeo aqui
+	rows, err := a.db.QueryContext(ctx, `SELECT id, origem FROM meus_videos WHERE origem != ''`)
 	if err != nil {
 		return ja
 	}
 	defer rows.Close()
 	prefixo := strings.TrimSuffix(linkDaMensagem(l, 0), "0")
 	for rows.Next() {
+		var video int64
 		var o string
-		if rows.Scan(&o) == nil && strings.HasPrefix(o, prefixo) {
+		if rows.Scan(&video, &o) == nil && strings.HasPrefix(o, prefixo) {
 			if id, err := strconv.ParseInt(strings.TrimPrefix(o, prefixo), 10, 64); err == nil {
-				ja[id] = true
+				ja[id] = video
 			}
 		}
 	}
@@ -686,12 +757,14 @@ func (a *app) sessaoParaRastrear() (string, func(), error) {
 }
 
 type videoDoGrupo struct {
-	Mensagem int64   `json:"mensagem"`
-	Nome     string  `json:"nome"`
-	Data     string  `json:"data,omitempty"`
-	Tamanho  int64   `json:"tamanho"`
-	Duracao  float64 `json:"duracao,omitempty"`
-	Ja       bool    `json:"ja"`
+	Mensagem int64    `json:"mensagem"`
+	Nome     string   `json:"nome"`
+	Data     string   `json:"data,omitempty"`
+	Tamanho  int64    `json:"tamanho"`
+	Duracao  float64  `json:"duracao,omitempty"`
+	Ja       bool     `json:"ja"`
+	Caminho  []string `json:"caminho,omitempty"` // as pastas dentro do grupo (curso › módulo, S55)
+	Video    int64    `json:"video,omitempty"`   // já baixado: o id em Meus vídeos
 }
 
 // rastrearGrupo: os vídeos do grupo, com o nome que cada um vai ganhar, e o nome do grupo.
@@ -713,7 +786,8 @@ func (a *app) rastrearGrupo(ctx context.Context, l linkDoTelegram) (string, []vi
 	ja := a.jaBaixadas(ctx, l)
 	videos := []videoDoGrupo{}
 	for _, m := range lista.soVideos(func(mensagemDoGrupo) bool { return true }) {
-		v := videoDoGrupo{Mensagem: m.id, Nome: nomeDoVideo(m.texto, m.arquivo, m.data), Tamanho: m.tamanho, Duracao: m.duracao, Ja: ja[m.id]}
+		caminho, nome := aulaDaMensagem(m.texto, m.arquivo, m.data)
+		v := videoDoGrupo{Mensagem: m.id, Nome: nome, Caminho: caminho, Tamanho: m.tamanho, Duracao: m.duracao, Ja: ja[m.id] > 0, Video: ja[m.id]}
 		if m.data > 0 {
 			v.Data = time.Unix(m.data, 0).UTC().Format(time.RFC3339)
 		}
@@ -785,7 +859,7 @@ func (a *app) baixarDoTelegram(ctx context.Context, id int64) {
 		// Os escolhidos na lista do rastreio (sem escolha, todos), menos os que já estão aqui.
 		var previsto int64
 		for _, m := range lista.soVideos(func(m mensagemDoGrupo) bool {
-			return !ja[m.id] && (p.escolhidas == nil || p.escolhidas[m.id])
+			return ja[m.id] == 0 && (p.escolhidas == nil || p.escolhidas[m.id])
 		}) {
 			g.info[m.id] = m
 			previsto += m.tamanho
@@ -901,9 +975,17 @@ func (g *guardaDoPedido) guardarProntos(ctx context.Context) error {
 	baixados := videosBaixados(g.tmp)
 	for _, b := range baixados {
 		m, sabe := g.info[b.mensagem]
-		nome := g.p.Nome
+		nome, pasta := g.p.Nome, g.p.Pasta
 		switch {
-		case g.p.Tudo || nome == "":
+		case g.p.Tudo:
+			if !sabe {
+				m = mensagemDoGrupo{arquivo: b.nome}
+			}
+			// No grupo de um curso, cada aula vai para a pasta do curso e do módulo dela (S55).
+			var caminho []string
+			caminho, nome = aulaDaMensagem(m.texto, primeiro(m.arquivo, b.nome), m.data)
+			pasta = limparPasta(strings.Join(append([]string{g.p.Pasta}, caminho...), "/"))
+		case nome == "":
 			if !sabe {
 				m = mensagemDoGrupo{arquivo: b.nome}
 			}
@@ -920,7 +1002,7 @@ func (g *guardaDoPedido) guardarProntos(ctx context.Context) error {
 		if m.data > 0 {
 			criadoEm = time.Unix(m.data, 0).UTC().Format(time.RFC3339)
 		}
-		v, err := g.a.guardarNaPasta(ctx, b.caminho, g.p.Pasta, nome, origem, criadoEm, b.mensagem)
+		v, err := g.a.guardarNaPasta(ctx, b.caminho, pasta, nome, origem, criadoEm, b.mensagem)
 		if err != nil {
 			return err
 		}
@@ -1028,7 +1110,7 @@ func (a *app) handlePedirAoTelegram(w http.ResponseWriter, r *http.Request) {
 		erroJSON(w, http.StatusBadRequest, "O link é do grupo, não de uma mensagem: copie o link da mensagem ou marque \"todos os vídeos do grupo\".")
 		return
 	}
-	pasta := limparNome(corpo.Pasta)
+	pasta := limparPasta(corpo.Pasta)
 	if pasta == "" {
 		erroJSON(w, http.StatusBadRequest, "Escolha uma pasta.")
 		return
@@ -1176,7 +1258,9 @@ func (a *app) salvosDoTelegram(ctx context.Context) ([]salvoDoTelegram, error) {
 		if l, ok := lerLinkDoTelegram(lista[i].Link); ok {
 			ja := a.jaBaixadas(ctx, l)
 			for j := range lista[i].Videos {
-				lista[i].Videos[j].Ja = ja[lista[i].Videos[j].Mensagem]
+				v := &lista[i].Videos[j]
+				v.Video = ja[v.Mensagem]
+				v.Ja = v.Video > 0
 			}
 		}
 	}
@@ -1313,7 +1397,7 @@ func (a *app) handleMudarMeuVideo(w http.ResponseWriter, r *http.Request) {
 		nome = limparNome(*corpo.Nome)
 	}
 	if corpo.Pasta != nil {
-		pasta = limparNome(*corpo.Pasta)
+		pasta = limparPasta(*corpo.Pasta)
 	}
 	if nome == "" || pasta == "" {
 		erroJSON(w, http.StatusBadRequest, "Nome e pasta não podem ficar vazios.")
@@ -1332,13 +1416,13 @@ func (a *app) handleMudarMeuVideo(w http.ResponseWriter, r *http.Request) {
 			falha(w, err)
 			return
 		}
-		os.Remove(filepath.Dir(filepath.Join(a.pastaDosMeusVideos(), v.arquivo))) // a pasta antiga, se ficou vazia
+		a.tirarPastasVazias(filepath.Dir(filepath.Join(a.pastaDosMeusVideos(), v.arquivo))) // a pasta antiga, se ficou vazia
 	}
 	if _, err := a.db.ExecContext(r.Context(), `UPDATE meus_videos SET nome = ?, pasta = ?, arquivo = ? WHERE id = ?`, nome, pasta, novo, v.ID); err != nil {
 		falha(w, err)
 		return
 	}
-	a.db.ExecContext(r.Context(), `UPDATE progresso SET titulo = ?, subtitulo = ? WHERE chave = ?`, nome, pasta, fmt.Sprintf("proprio:%d", v.ID))
+	a.db.ExecContext(r.Context(), `UPDATE progresso SET titulo = ?, subtitulo = ? WHERE chave = ?`, nome, strings.ReplaceAll(pasta, "/", " › "), fmt.Sprintf("proprio:%d", v.ID))
 	v, _ = a.meuVideo(r.Context(), v.ID)
 	writeJSON(w, http.StatusOK, v)
 }
@@ -1353,11 +1437,71 @@ func (a *app) handleApagarMeuVideo(w http.ResponseWriter, r *http.Request) {
 		falha(w, err)
 		return
 	}
-	os.Remove(filepath.Dir(caminho))
+	a.tirarPastasVazias(filepath.Dir(caminho))
 	os.Remove(a.capaDoMeuVideo(v.ID))
 	a.db.ExecContext(r.Context(), `DELETE FROM meus_videos WHERE id = ?`, v.ID)
 	a.db.ExecContext(r.Context(), `DELETE FROM progresso WHERE chave = ?`, fmt.Sprintf("proprio:%d", v.ID))
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// tirarPastasVazias apaga a pasta e as de cima enquanto ficarem vazias, sem passar da raiz.
+func (a *app) tirarPastasVazias(dir string) {
+	raiz := filepath.Clean(a.pastaDosMeusVideos())
+	for dir = filepath.Clean(dir); strings.HasPrefix(dir, raiz+string(filepath.Separator)); dir = filepath.Dir(dir) {
+		if os.Remove(dir) != nil {
+			return // não está vazia
+		}
+	}
+}
+
+// handleApagarPastaDeVideos (S55): a lixeira de uma pasta inteira (um curso, um módulo): apaga do disco os
+// vídeos dela e das subpastas, com capa e progresso. Do Telegram, eles continuam nos Salvos para
+// baixar de novo.
+func (a *app) handleApagarPastaDeVideos(w http.ResponseWriter, r *http.Request) {
+	var corpo struct {
+		Pasta string `json:"pasta"`
+	}
+	if !lerCorpo(w, r, &corpo) {
+		return
+	}
+	pasta := limparPasta(corpo.Pasta)
+	if pasta == "" {
+		erroJSON(w, http.StatusBadRequest, "Diga qual pasta apagar.")
+		return
+	}
+	rows, err := a.db.QueryContext(r.Context(), `SELECT id, arquivo, tamanho FROM meus_videos WHERE pasta = ? OR substr(pasta, 1, ?) = ?`,
+		pasta, len(pasta)+1, pasta+"/")
+	if err != nil {
+		falha(w, err)
+		return
+	}
+	type alvo struct {
+		id      int64
+		arquivo string
+		tamanho int64
+	}
+	alvos := []alvo{}
+	for rows.Next() {
+		var x alvo
+		if rows.Scan(&x.id, &x.arquivo, &x.tamanho) == nil {
+			alvos = append(alvos, x)
+		}
+	}
+	rows.Close()
+	var bytes int64
+	for _, x := range alvos {
+		caminho := filepath.Join(a.pastaDosMeusVideos(), x.arquivo)
+		if err := os.Remove(caminho); err != nil && !errors.Is(err, os.ErrNotExist) {
+			falha(w, err)
+			return
+		}
+		a.tirarPastasVazias(filepath.Dir(caminho))
+		os.Remove(a.capaDoMeuVideo(x.id))
+		a.db.ExecContext(r.Context(), `DELETE FROM meus_videos WHERE id = ?`, x.id)
+		a.db.ExecContext(r.Context(), `DELETE FROM progresso WHERE chave = ?`, fmt.Sprintf("proprio:%d", x.id))
+		bytes += x.tamanho
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"apagados": len(alvos), "liberado": bytes})
 }
 
 func (a *app) handleCapaDoMeuVideo(w http.ResponseWriter, r *http.Request) {

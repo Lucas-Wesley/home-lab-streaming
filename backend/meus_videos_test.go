@@ -88,14 +88,14 @@ func TestBaixarDoTelegramParaAPasta(t *testing.T) {
 		t.Fatalf("lista: %+v", r)
 	}
 	v := r.Videos[0]
-	// A barra vira espaço: um nível de pasta só. A foto que veio junto ficou de fora.
-	if v.Nome != "Praia do Forte" || v.Pasta != "Viagens Bahia" || v.Origem != "https://t.me/c/1234567890/40" {
+	// A barra é subpasta (S55). A foto que veio junto ficou de fora.
+	if v.Nome != "Praia do Forte" || v.Pasta != "Viagens/Bahia" || v.Origem != "https://t.me/c/1234567890/40" {
 		t.Fatalf("vídeo: %+v", v)
 	}
-	if _, err := os.Stat(filepath.Join(e.a.pastaDosMeusVideos(), "Viagens Bahia", "Praia do Forte.mp4")); err != nil {
+	if _, err := os.Stat(filepath.Join(e.a.pastaDosMeusVideos(), "Viagens", "Bahia", "Praia do Forte.mp4")); err != nil {
 		t.Fatal(err)
 	}
-	if fotos, _ := filepath.Glob(filepath.Join(e.a.pastaDosMeusVideos(), "*", "*.jpg")); len(fotos) > 0 {
+	if fotos, _ := filepath.Glob(filepath.Join(e.a.pastaDosMeusVideos(), "*", "*", "*.jpg")); len(fotos) > 0 {
 		t.Fatal("a foto não devia entrar:", fotos)
 	}
 
@@ -132,7 +132,7 @@ func TestBaixarDoTelegramParaAPasta(t *testing.T) {
 		t.Fatalf("progresso: %d %s", status, texto)
 	}
 	p2 := e.a.progressoDe(context.Background(), chave)
-	if p2 == nil || p2.Titulo != "Praia do Forte" || p2.Subtitulo != "Viagens Bahia" {
+	if p2 == nil || p2.Titulo != "Praia do Forte" || p2.Subtitulo != "Viagens › Bahia" {
 		t.Fatalf("progresso: %+v", p2)
 	}
 	e.json(t, "/api/meus-videos", &r)
@@ -409,5 +409,104 @@ func TestSalvarGrupoEVideo(t *testing.T) {
 	e.json(t, "/api/meus-videos", &r)
 	if len(r.Salvos) != 1 {
 		t.Fatalf("depois de apagar: %+v", r.Salvos)
+	}
+}
+
+// S55: o texto de cada vídeo de um grupo de curso traz o caminho (curso › módulo › aula).
+func TestAulaDaMensagem(t *testing.T) {
+	casos := []struct {
+		texto, arquivo string
+		pastas, nome   string
+	}{
+		// Nome genérico: a aula é o último nível; o "Indexado por @canal" sai.
+		{"#F0002 aula\n\n002 - Bônus\n=001 - System design\n==002 - Plano de capacidade - Indexado por @canalqualquer", "aula.mp4",
+			"002 - Bônus/001 - System design", "002 - Plano de capacidade"},
+		{"#F002 1. Aula\n\n2. Fundamentos\n=1. O que é", "1. Aula.mp4", "2. Fundamentos", "1. O que é"},
+		// Nome próprio: as pastas são o caminho todo.
+		{"#F002 1. Conceitos Fundamentais\n\n1. Algoritmos\n=2. Masterclass", "x.mp4", "1. Algoritmos/2. Masterclass", "1. Conceitos Fundamentais"},
+		{"#F001 1-Introdução\n\n01 - Introdução", "1-Introdução.mp4", "01 - Introdução", "1-Introdução"},
+		// Sem etiqueta ou sem caminho: como antes.
+		{"Praia do Forte\nque dia!", "VID.mp4", "", "Praia do Forte"},
+		{"#Doc001\n\n#outra", "a.rar", "", "a"},
+		{"", "Aula 3.mp4", "", "Aula 3"},
+		// Depois do caminho, o resto é descrição.
+		{"#F9 Nome\n\nCurso\n=Módulo\nUma descrição qualquer\n=não é pasta", "x.mp4", "Curso/Módulo", "Nome"},
+	}
+	for _, c := range casos {
+		pastas, nome := aulaDaMensagem(c.texto, c.arquivo, 0)
+		if got := strings.Join(pastas, "/"); got != c.pastas || nome != c.nome {
+			t.Errorf("%q: pastas %q nome %q; queria %q e %q", c.texto, got, nome, c.pastas, c.nome)
+		}
+	}
+	if got := limparPasta(" A / / B:C /"); got != "A/B C" {
+		t.Fatal(got)
+	}
+}
+
+// S55: baixar parte de um grupo de curso põe cada aula na pasta do curso e do módulo; o rastreio
+// mostra o caminho e, depois de baixar, o id; a lixeira da pasta apaga o curso inteiro.
+func TestGrupoDeCursoEmSubpastasELixeiraDaPasta(t *testing.T) {
+	e := novoAmbiente(t)
+	comTdlFalso(t)
+	t.Setenv("TDL_FALSO_CURSO", "1")
+
+	var rastreio struct {
+		Videos []videoDoGrupo `json:"videos"`
+	}
+	if status, texto := e.pedir(t, "POST", "/api/meus-videos/telegram/rastrear", map[string]string{"link": "https://t.me/c/1234567890"}); status != 200 {
+		t.Fatalf("%d %s", status, texto)
+	} else if err := json.Unmarshal([]byte(texto), &rastreio); err != nil {
+		t.Fatal(err)
+	}
+	caminhos := map[int64]string{}
+	for _, v := range rastreio.Videos {
+		caminhos[v.Mensagem] = strings.Join(v.Caminho, "/") + " › " + v.Nome
+	}
+	if caminhos[50] != "001 - Curso Inventado/001 - Módulo A › 001 - Primeira lição" || caminhos[52] != "002 - Outro Curso › Outro" {
+		t.Fatalf("%v", caminhos)
+	}
+
+	p := pedirEBaixar(t, e, map[string]any{"link": "https://t.me/c/1234567890", "pasta": "Grupo Inventado", "tudo": true, "mensagens": []int64{50, 51}})
+	if p.Estado != "pronto" || p.Videos != 2 {
+		t.Fatalf("%+v", p)
+	}
+	var r respostaDosMeusVideos
+	e.json(t, "/api/meus-videos", &r)
+	var lista []string
+	for _, v := range r.Videos {
+		lista = append(lista, v.Pasta+" › "+v.Nome)
+	}
+	if got := strings.Join(lista, "|"); got != "Grupo Inventado/001 - Curso Inventado/001 - Módulo A › 001 - Primeira lição|Grupo Inventado/001 - Curso Inventado/002 - Módulo B › 2-Segunda" {
+		t.Fatal(got)
+	}
+	if _, err := os.Stat(filepath.Join(e.a.pastaDosMeusVideos(), "Grupo Inventado", "001 - Curso Inventado", "002 - Módulo B", "2-Segunda.mp4")); err != nil {
+		t.Fatal(err)
+	}
+	// O rastreio de novo: os baixados vêm com o id daqui.
+	_, texto := e.pedir(t, "POST", "/api/meus-videos/telegram/rastrear", map[string]string{"link": "https://t.me/c/1234567890"})
+	json.Unmarshal([]byte(texto), &rastreio)
+	for _, v := range rastreio.Videos {
+		if (v.Mensagem == 50 || v.Mensagem == 51) != (v.Ja && v.Video > 0) {
+			t.Fatalf("%+v", v)
+		}
+	}
+
+	// Arquivo posto à mão numa subpasta também aparece, com a pasta inteira.
+	os.WriteFile(filepath.Join(e.a.pastaDosMeusVideos(), "Grupo Inventado", "001 - Curso Inventado", "extra.mp4"), []byte("v"), 0o644)
+	e.json(t, "/api/meus-videos", &r)
+	if len(r.Videos) != 3 {
+		t.Fatalf("%+v", r.Videos)
+	}
+
+	status, texto := e.pedir(t, "POST", "/api/meus-videos/apagar-pasta", map[string]string{"pasta": "Grupo Inventado/001 - Curso Inventado"})
+	if status != 200 || !strings.Contains(texto, `"apagados":3`) {
+		t.Fatalf("%d %s", status, texto)
+	}
+	if _, err := os.Stat(filepath.Join(e.a.pastaDosMeusVideos(), "Grupo Inventado")); !os.IsNotExist(err) {
+		t.Fatalf("as pastas vazias deviam sumir: %v", err)
+	}
+	e.json(t, "/api/meus-videos", &r)
+	if len(r.Videos) != 0 {
+		t.Fatalf("%+v", r.Videos)
 	}
 }

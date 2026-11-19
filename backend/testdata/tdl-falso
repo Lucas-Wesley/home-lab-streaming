@@ -2,6 +2,7 @@
 # tdl falso dos testes (dados inventados): guarda os argumentos (um por linha) em $TDL_FALSO_ARGS e
 # faz o que o tdl faria. $TDL_FALSO_ERRO: falha com esse texto. $TDL_FALSO_VIDEOS: quantos vídeos
 # a mensagem do "dl -u" tem (padrão 1); sempre vem uma foto junto, que deve ficar de fora.
+# $TDL_FALSO_CURSO: o export traz também um grupo de curso (S55).
 printf '%s\n' "$@" >> "$TDL_FALSO_ARGS"
 if [ -n "$TDL_FALSO_ERRO" ]; then
   echo "Error: $TDL_FALSO_ERRO" >&2
@@ -33,6 +34,12 @@ case "$cmd" in
     add 6 '{"id":6,"type":"message","file":"apostila.rar","date":1767268800}'
     add 5 '{"id":5,"type":"message","file":"VID_20260101_090000.mp4","date":1767268800,"raw":{"Media":{"Document":{"Size":52428800,"Attributes":[{"Duration":12.5}]}}}}'
     add 4 '{"id":4,"type":"message","file":"Aula 1.mp4","date":1767268800,"text":"#F1 Aula 1 - Começo\n\nMódulo 1"}'
+    # $TDL_FALSO_CURSO: um grupo de curso, com o caminho de cada aula no texto (S55).
+    if [ -n "$TDL_FALSO_CURSO" ]; then
+      add 50 '{"id":50,"type":"message","file":"aula.mp4","date":1767355200,"text":"#F0001 aula\n\n001 - Curso Inventado\n=001 - Módulo A\n==001 - Primeira lição - Indexado por @canalinventado"}'
+      add 51 '{"id":51,"type":"message","file":"2-Segunda.mp4","date":1767355260,"text":"#F0002 2-Segunda\n\n001 - Curso Inventado\n=002 - Módulo B"}'
+      add 52 '{"id":52,"type":"message","file":"Outro.mp4","date":1767355320,"text":"#F0003 Outro\n\n002 - Outro Curso"}'
+    fi
     printf '{"id":1234567890,"messages":[%s]}' "$msgs" > "$saida"
     ;;
   dl)

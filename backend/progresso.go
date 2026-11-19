@@ -92,7 +92,7 @@ func (a *app) guardarProgresso(ctx context.Context, chave string, posicao, durac
 		if err != nil {
 			return err
 		}
-		p.Titulo, p.Subtitulo, p.Capa = v.Nome, v.Pasta, v.Capa
+		p.Titulo, p.Subtitulo, p.Capa = v.Nome, strings.ReplaceAll(v.Pasta, "/", " › "), v.Capa // curso › módulo (S55)
 	case "arquivo":
 		f, t, err := a.arquivo(ctx, id)
 		if err != nil {

@@ -239,6 +239,14 @@ func TestFrasesSemVideo(t *testing.T) {
 	if r.Pedido == nil || r.Pedido.Estado != "enviado" || r.Pedido.Audio != "sem_video" || !strings.Contains(r.Pedido.AudioMsg, "abra um torrent") {
 		t.Fatalf("sem vídeo: %+v", r.Pedido)
 	}
+
+	// Um filme não leva temporada e episódio no nome.
+	e.pedir(t, "POST", "/api/titulos/filme/77/flashcards", map[string]any{})
+	e.a.proximasFrases(context.Background())
+	e.json(t, "/api/titulos/filme/77/flashcards", &r)
+	if r.Pedido == nil || r.Pedido.Nome != "A Era das Pirâmides" {
+		t.Errorf("nome do filme: %+v", r.Pedido)
+	}
 	if len(f.audiosDaProposta) != 1 || f.audiosDaProposta[0]["audio"] != "" {
 		t.Errorf("as frases ainda esperam o áudio: %+v", f.audiosDaProposta)
 	}

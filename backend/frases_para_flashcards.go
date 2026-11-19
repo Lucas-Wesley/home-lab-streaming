@@ -372,7 +372,10 @@ func (a *app) fazerFrases(ctx context.Context, p *pedidoDeFrases, etapa func(str
 	if err != nil {
 		return err
 	}
-	nome := nomeDoEnvio(t.Titulo, p.Temporada, p.Episodio, "")
+	nome := t.Titulo
+	if p.Tipo == "serie" {
+		nome = nomeDoEnvio(t.Titulo, p.Temporada, p.Episodio, "")
+	}
 	a.db.ExecContext(ctx, `UPDATE frases_para_flashcards SET nome = ? WHERE id = ?`, nome, p.ID)
 	p.Nome = nome
 	if t.Idioma != "" && t.Idioma != "en" {

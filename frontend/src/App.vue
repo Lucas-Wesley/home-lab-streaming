@@ -153,7 +153,7 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', aoMudarHash))
       <Canais v-else-if="rota.nome === 'canais'" />
       <Catalogo v-else-if="rota.nome === 'filmes'" :key="`filme${rota.param}`" tipo="filme" :categoria="rota.param" />
       <Catalogo v-else-if="rota.nome === 'series'" :key="`serie${rota.param}`" tipo="serie" :categoria="rota.param" />
-      <Favoritos v-else-if="rota.nome === 'favoritos'" />
+      <Favoritos v-else-if="rota.nome === 'favoritos'" :key="rota.param" :secao="rota.param" />
       <Torrents v-else-if="rota.nome === 'torrents'" :busca="rota.opcoes.get('q') || ''" />
       <Titulo v-else-if="rota.nome === 'titulo'" :key="rota.param" :param="rota.param" />
       <Torrent v-else-if="rota.nome === 'torrent'" :key="rota.param" :hash="rota.param" />

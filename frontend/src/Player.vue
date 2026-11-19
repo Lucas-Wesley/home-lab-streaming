@@ -21,7 +21,9 @@ const props = defineProps({
   titulo: { type: String, default: '' },
   inicio: { type: Number, default: 0 },
   dupla: { type: Boolean, default: false }, // a versão com a legenda dupla gravada na imagem (S46)
+  minimizado: { type: Boolean, default: false }, // fora da rota do player: Picture-in-Picture ou mini player (S53)
 })
+const emit = defineEmits(['fechar'])
 const recado = inject('recado')
 
 const chave = ref(props.chave) // no ao vivo, muda ao trocar de versão
@@ -491,6 +493,7 @@ let ultimoToque = { quando: 0, lado: '' }
 let cliqueAdiado
 function tocouNoPalco(e) {
   if (e.target !== e.currentTarget && e.target !== video.value) return
+  if (props.minimizado) return expandir()
   const r = e.currentTarget.getBoundingClientRect()
   const x = (e.clientX - r.left) / r.width
   const lado = x < 0.35 ? 'esquerda' : x > 0.65 ? 'direita' : 'meio'
@@ -517,7 +520,7 @@ function tocouNoPalco(e) {
 }
 
 function aoTeclar(e) {
-  if (gaveta.value || e.target.closest?.('input, textarea, select, [contenteditable]')) return
+  if (props.minimizado || gaveta.value || e.target.closest?.('input, textarea, select, [contenteditable]')) return
   const teclas = {
     ' ': alternarPlay,
     k: alternarPlay,
@@ -564,6 +567,80 @@ function trocarNivel(i) {
   if (hls) hls.currentLevel = i
 }
 
+// ---------- Sair sem parar: Picture-in-Picture e mini player (S53) ----------
+
+const emPip = ref(false)
+let foiParaTela = false
+
+// O "voltar" do player é um toque: o navegador só abre o Picture-in-Picture com um toque. Pelo
+// voltar do celular (sem toque), o vídeo vai para o mini player no canto do app.
+function sair() {
+  const v = video.value
+  if (temPip && v && !v.paused && !document.pictureInPictureElement && ['tocando', 'carregando', 'travado'].includes(estado.value)) {
+    v.requestPictureInPicture().catch(() => {})
+  }
+  voltar('#/inicio')
+}
+
+function expandir() {
+  location.hash = rotaDoPlayer(props.chave, { titulo: props.titulo, dupla: props.dupla })
+}
+
+function fechar() {
+  guardarProgresso()
+  if (document.pictureInPictureElement) document.exitPictureInPicture().catch(() => {})
+  emit('fechar')
+}
+
+function aoEntrarNoPip() {
+  emPip.value = true
+}
+
+// Fechou a janelinha: no X o navegador pausa o vídeo, e aí ele para de vez; no "voltar para o app"
+// o vídeo segue tocando, e o player abre de novo.
+function aoSairDoPip() {
+  emPip.value = false
+  if (!props.minimizado) return
+  if (video.value?.paused) fechar()
+  else expandir()
+}
+
+watch(
+  () => props.minimizado,
+  async (mini) => {
+    if (!mini) {
+      if (document.pictureInPictureElement) document.exitPictureInPicture().catch(() => {})
+      mostrarControles()
+      return
+    }
+    gaveta.value = ''
+    // Sem o que continuar (erro, outro aparelho, mandou para a tela, acabou): fecha.
+    if (foiParaTela || ['erro', 'perdeu'].includes(estado.value) || video.value?.ended) return emit('fechar')
+    if (document.fullscreenElement) await document.exitFullscreen().catch(() => {})
+  },
+)
+
+// Minimizado, o player não insiste: problema que pararia a tela fecha com um recado.
+watch(estado, (e) => {
+  if (!props.minimizado) return
+  if (e === 'perdeu') {
+    recado(quemPegou.value, true)
+    fechar()
+  } else if (e === 'erro') {
+    recado(mensagem.value || 'O vídeo parou.', true)
+    fechar()
+  }
+})
+
+// Com o app indo para o fundo, o Chrome pode abrir o Picture-in-Picture sozinho (onde houver).
+function pedirPipAutomatico() {
+  try {
+    navigator.mediaSession?.setActionHandler?.('enterpictureinpicture', () => video.value?.requestPictureInPicture().catch(() => {}))
+  } catch {
+    // navegador sem essa ação
+  }
+}
+
 // ---------- Próximo episódio (S52) ----------
 
 const proximo = ref(null) // { id, temporada, numero, titulo, posicao } e o nome da série
@@ -605,7 +682,7 @@ function dispensarProximo() {
 
 function aoAcabar() {
   controles.value = true
-  if (!proximo.value || dispensado.value) return
+  if (!proximo.value || dispensado.value || props.minimizado) return
   contagem.value = 10
   clearInterval(relogioDaContagem)
   relogioDaContagem = setInterval(() => {
@@ -731,6 +808,7 @@ async function mandarParaTela(tela) {
   try {
     await guardarProgresso()
     vigiando = false // a tela vai assumir: não é para avisar que "outro aparelho pegou"
+    foiParaTela = true
     await tocarNaTela(tela, chave.value, { posicao, dupla: props.dupla })
     video.value?.pause()
     gaveta.value = ''
@@ -754,6 +832,7 @@ watch(gaveta, (g) => {
 onMounted(() => {
   if (aoVivo) carregarAlternativas()
   carregarProximo()
+  pedirPipAutomatico()
   abrir()
   carregarTelas()
   relogioDoProgresso = setInterval(guardarProgresso, 10000)
@@ -799,7 +878,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="caixa" class="player" :class="{ 'ao-vivo': aoVivo, 'sem-controles': !controles, 'tela-cheia': telaCheia }" @pointermove="aoMexer">
+  <div ref="caixa" class="player" :class="{ 'ao-vivo': aoVivo, 'sem-controles': !controles, 'tela-cheia': telaCheia, mini: minimizado && !emPip, escondido: minimizado && emPip }" @pointermove="aoMexer">
     <div class="palco" @pointerup="tocouNoPalco">
       <video
         ref="video"
@@ -816,6 +895,8 @@ onBeforeUnmount(() => {
         @progress="aoCarregarMais"
         @error="falhou"
         @ended="aoAcabar"
+        @enterpictureinpicture="aoEntrarNoPip"
+        @leavepictureinpicture="aoSairDoPip"
       >
         <track
           v-if="legenda"
@@ -837,6 +918,14 @@ onBeforeUnmount(() => {
       </div>
       <button v-else-if="estado === 'pausado' && controles" class="grande" aria-label="Tocar" @click="alternarPlay"><Icone nome="tocar" /></button>
       <div v-if="pulo" class="pulo" :class="pulo.lado" aria-hidden="true">{{ pulo.texto }}</div>
+
+      <!-- Mini player no canto (S53): tocar no vídeo abre de novo; o X para. -->
+      <div v-if="minimizado" class="mini-controles">
+        <button class="botao icone" :aria-label="video && !video.paused ? 'Pausar' : 'Tocar'" @click.stop="alternarPlay"><Icone :nome="video && !video.paused ? 'pausar' : 'tocar'" /></button>
+        <button class="botao icone" aria-label="Abrir o player" @click.stop="expandir"><Icone nome="ampliar" /></button>
+        <button v-if="temPip" class="botao icone" aria-label="Picture-in-Picture" @click.stop="alternarPip"><Icone nome="pip" /></button>
+        <button class="botao icone" aria-label="Fechar o vídeo" @click.stop="fechar"><Icone nome="fechar" /></button>
+      </div>
 
       <!-- Próximo episódio: nos créditos, no canto; no fim, conta 10 s e vai sozinho. -->
       <div v-if="proximoNaTela" class="proximo-episodio" role="status">
@@ -862,7 +951,7 @@ onBeforeUnmount(() => {
 
       <!-- Controles -->
       <header class="topo controles-do-player" @pointerdown="aoTocarNosControles">
-        <button class="botao icone" aria-label="Voltar" @click="voltar('#/inicio')"><Icone nome="voltar" /></button>
+        <button class="botao icone" aria-label="Voltar" @click="sair"><Icone nome="voltar" /></button>
         <div class="nome-do-video">
           <span class="titulo">{{ nome }}</span>
           <span v-if="subtitulo" class="subtitulo">
@@ -1582,6 +1671,80 @@ video::cue {
     font-size: 0.9rem;
     transform: none;
   }
+}
+
+/* ---------- Mini player e Picture-in-Picture (S53) ---------- */
+
+.mini-controles {
+  display: none;
+}
+
+.player.mini {
+  inset: auto max(12px, env(safe-area-inset-right)) calc(84px + env(safe-area-inset-bottom)) auto;
+  z-index: 40;
+  display: block;
+  width: min(300px, 62vw);
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: var(--raio);
+  box-shadow: 0 8px 28px rgb(0 0 0 / 45%);
+}
+
+@media (min-width: 821px) {
+  .player.mini {
+    bottom: 24px;
+    width: 340px;
+  }
+}
+
+.player.mini .palco {
+  height: 100%;
+  aspect-ratio: auto !important;
+  margin: 0 !important;
+}
+
+.player.mini .controles-do-player,
+.player.mini .cartoes,
+.player.mini .painel-ao-vivo,
+.player.mini .proximo-episodio,
+.player.mini .aviso-no-alto,
+.player.mini .pulo,
+.player.mini .grande,
+.player.mini .texto-do-estado,
+.player.mini .suave-escuro {
+  display: none !important;
+}
+
+.player.mini .girando {
+  width: 28px;
+  height: 28px;
+}
+
+.player.mini .mini-controles {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 2;
+  display: flex;
+  justify-content: space-around;
+  padding: 18px 4px 2px;
+  background: linear-gradient(transparent, rgb(0 0 0 / 70%));
+}
+
+.player.mini .mini-controles .botao.icone {
+  width: 36px;
+  height: 36px;
+}
+
+/* No Picture-in-Picture, o vídeo continua no DOM, mas fora de vista. */
+.player.escondido {
+  inset: auto auto 0 0;
+  width: 2px;
+  height: 2px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
 }
 
 /* ---------- Gaveta ---------- */

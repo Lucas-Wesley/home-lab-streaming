@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, provide, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 import Ajustes from './Ajustes.vue'
 import BarraDoControle from './BarraDoControle.vue'
 import Canais from './Canais.vue'
@@ -61,6 +61,23 @@ const secao = computed(() => {
 
 // Na barra do celular, as seções fora dela acendem "Outros".
 const naBarra = computed(() => (MENU.some((item) => item.naBarra && item.rota === secao.value) ? secao.value : 'outros'))
+
+// O player continua vivo fora da rota dele (S53): ao sair, o vídeo vai para o Picture-in-Picture ou
+// para o mini player no canto, e só para quando ele é fechado. Voltar ao mesmo vídeo reaproveita o
+// player que já toca; outro vídeo abre um player novo.
+const emReproducao = ref(null) // { id, chave, titulo, inicio, dupla }
+let numeroDoPlayer = 0
+watch(
+  rota,
+  (r) => {
+    if (r.nome !== 'assistir') return
+    const dupla = r.opcoes.get('dupla') === '1'
+    const atual = emReproducao.value
+    if (atual && atual.chave === r.param && atual.dupla === dupla) return
+    emReproducao.value = { id: ++numeroDoPlayer, chave: r.param, titulo: r.opcoes.get('titulo') || '', inicio: Number(r.opcoes.get('t')) || 0, dupla }
+  },
+  { immediate: true },
+)
 
 // No player e no controle, a tela é do vídeo: o menu some.
 const telaCheia = computed(() => ['assistir', 'controle'].includes(rota.value.nome))
@@ -133,14 +150,7 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', aoMudarHash))
     </aside>
 
     <main class="conteudo">
-      <Player
-        v-if="rota.nome === 'assistir'"
-        :key="rota.param + rota.opcoes.toString()"
-        :chave="rota.param"
-        :titulo="rota.opcoes.get('titulo') || ''"
-        :inicio="Number(rota.opcoes.get('t')) || 0"
-        :dupla="rota.opcoes.get('dupla') === '1'"
-      />
+      <template v-if="rota.nome === 'assistir'"></template>
       <Controle v-else-if="rota.nome === 'controle'" :key="rota.param" :id="rota.param" />
       <Filme v-else-if="rota.nome === 'filme'" :key="rota.param" :id="rota.param" />
       <Serie v-else-if="rota.nome === 'serie'" :key="rota.param" :id="rota.param" />
@@ -167,6 +177,17 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', aoMudarHash))
       <Ajustes v-else-if="rota.nome === 'ajustes'" :tela="telaAnterior" :secao="rota.param" />
       <Inicio v-else :busca="rota.opcoes.get('q') || ''" />
     </main>
+
+    <Player
+      v-if="emReproducao"
+      :key="emReproducao.id"
+      :chave="emReproducao.chave"
+      :titulo="emReproducao.titulo"
+      :inicio="emReproducao.inicio"
+      :dupla="emReproducao.dupla"
+      :minimizado="rota.nome !== 'assistir'"
+      @fechar="emReproducao = null"
+    />
 
     <BarraDoControle v-if="!telaCheia" />
 

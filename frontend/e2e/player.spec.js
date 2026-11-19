@@ -145,3 +145,53 @@ test('próximo episódio: aparece nos créditos e abre o seguinte', async ({ pag
   await expect(page.locator('.titulo')).toHaveText('Série de Teste T1 E2')
   await expect(page.locator('.proximo-episodio')).toHaveCount(0)
 })
+
+// Sair do player não para o vídeo (S53): pelo voltar do celular vai para o mini player no canto; pelo
+// voltar do player (um toque), para o Picture-in-Picture. Só o X para de vez.
+test('voltar leva ao mini player, que continua tocando, abre de novo e fecha', async ({ page }) => {
+  await entregarVideo(page, '**/api/video/filme/200.mp4')
+  await page.goto('/#/inicio')
+  await page.evaluate(() => (location.hash = '#/assistir/filme:200?titulo=Filme%20de%20teste'))
+  await expect(page.locator('.tempos')).toContainText('/ 0:40')
+  const posicao = () => page.locator('video').evaluate((v) => v.currentTime)
+  await expect.poll(posicao).toBeGreaterThan(1)
+
+  await page.goBack() // o voltar do celular: sem toque, sem Picture-in-Picture
+  const mini = page.locator('.player.mini')
+  await expect(mini).toBeVisible()
+  const antes = await posicao()
+  await expect.poll(posicao).toBeGreaterThan(antes + 1) // continua tocando
+  expect(await page.locator('video').evaluate((v) => v.paused)).toBe(false)
+
+  await mini.getByRole('button', { name: 'Abrir o player' }).click()
+  await expect(page.locator('.player.mini')).toHaveCount(0)
+  await expect(page).toHaveURL(/assistir\/filme:200/)
+  expect(await posicao()).toBeGreaterThan(antes) // o mesmo player, do mesmo ponto
+
+  await page.goBack()
+  await page.locator('.player.mini').getByRole('button', { name: 'Fechar o vídeo' }).click()
+  await expect(page.locator('.player')).toHaveCount(0)
+})
+
+test('o voltar do player abre o Picture-in-Picture', async ({ page }) => {
+  await entregarVideo(page, '**/api/video/filme/200.mp4')
+  await page.goto('/#/inicio')
+  await page.evaluate(() => (location.hash = '#/assistir/filme:200?titulo=Filme%20de%20teste'))
+  await expect.poll(() => page.locator('video').evaluate((v) => v.currentTime)).toBeGreaterThan(1)
+  await page.mouse.move(200, 200)
+  await page.getByRole('button', { name: 'Voltar' }).first().click()
+  await expect(page).toHaveURL(/#\/inicio/)
+  // Onde o navegador aceita, o vídeo está na janelinha (player escondido); senão, no mini player.
+  await expect(page.locator('.player.escondido, .player.mini')).toHaveCount(1)
+  const pip = await page.evaluate(() => !!document.pictureInPictureElement)
+  console.log('Picture-in-Picture no Chromium de teste:', pip)
+  if (pip) {
+    // Fechar a janelinha pelo X (o navegador pausa): para de vez.
+    await page.evaluate(async () => {
+      const v = document.querySelector('video')
+      v.pause()
+      await document.exitPictureInPicture()
+    })
+    await expect(page.locator('.player')).toHaveCount(0)
+  }
+})

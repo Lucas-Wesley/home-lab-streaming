@@ -111,6 +111,15 @@ function mudarVolume(delta) {
   enviar('volume', novo)
 }
 
+// Botões de volume do aparelho (S53): o Chrome do Android em geral não os entrega à página (o
+// sistema muda o volume do celular); onde entregar (teclado, alguns navegadores), viram o volume da tela.
+function teclaDeVolume(e) {
+  const delta = { AudioVolumeUp: 3, AudioVolumeDown: -3, VolumeUp: 3, VolumeDown: -3 }[e.key]
+  if (!delta) return
+  e.preventDefault()
+  mudarVolume(delta)
+}
+
 // A legenda só entra na tela junto com o vídeo: escolher outra, ou ajustar a sincronia, manda o
 // vídeo de novo, do mesmo ponto.
 const escolhendoLegenda = ref(false)
@@ -209,12 +218,14 @@ onMounted(() => {
   relogioDoEstado = setInterval(lerEstado, 1500)
   relogioDaLegenda = setInterval(() => (agora.value = Date.now()), 100)
   document.addEventListener('visibilitychange', lerEstado)
+  window.addEventListener('keydown', teclaDeVolume)
 })
 
 onBeforeUnmount(() => {
   clearInterval(relogioDoEstado)
   clearInterval(relogioDaLegenda)
   document.removeEventListener('visibilitychange', lerEstado)
+  window.removeEventListener('keydown', teclaDeVolume)
 })
 </script>
 

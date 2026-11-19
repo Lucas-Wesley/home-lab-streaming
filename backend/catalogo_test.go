@@ -96,10 +96,12 @@ func TestFavoritos(t *testing.T) {
 			t.Fatalf("%s: %d %s", c, status, corpo)
 		}
 	}
-	var f map[string][]item
+	var f struct {
+		Itens map[string][]item `json:"itens"`
+	}
 	e.json(t, "/api/favoritos", &f)
-	if len(f["canal"]) != 1 || len(f["filme"]) != 1 || f["filme"][0].Nome != "Ação Total (2024)" || len(f["serie"]) != 1 {
-		t.Fatalf("favoritos: %+v", f)
+	if len(f.Itens["canal"]) != 1 || len(f.Itens["filme"]) != 1 || f.Itens["filme"][0].Nome != "Ação Total (2024)" || len(f.Itens["serie"]) != 1 {
+		t.Fatalf("favoritos: %+v", f.Itens)
 	}
 	e.pedir(t, "DELETE", "/api/favoritos/filme/201", nil)
 	var chaves []string

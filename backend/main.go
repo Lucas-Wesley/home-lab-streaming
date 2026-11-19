@@ -104,7 +104,7 @@ func abrirBanco(caminho string) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := db.Exec(esquema + esquemaDosTorrents + esquemaDasLegendas + esquemaDasVerificacoes + esquemaDasOpcoes + esquemaDosDownloadsDaAssinatura + esquemaDaLegendaGerada + esquemaDosRelatos + esquemaDosEnviosAoAcervo + esquemaDosMeusVideos + esquemaDasBuscasSalvas + esquemaDaLegendaDupla + esquemaDasInformacoes + esquemaDoNivel + esquemaDasFrases); err != nil {
+	if _, err := db.Exec(esquema + esquemaDosTorrents + esquemaDasLegendas + esquemaDasVerificacoes + esquemaDasOpcoes + esquemaDosDownloadsDaAssinatura + esquemaDaLegendaGerada + esquemaDosRelatos + esquemaDosEnviosAoAcervo + esquemaDosMeusVideos + esquemaDasBuscasSalvas + esquemaDaLegendaDupla + esquemaDasInformacoes + esquemaDoNivel + esquemaDasFrases + esquemaDasPastas); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -127,6 +127,7 @@ func abrirBanco(caminho string) (*sql.DB, error) {
 		`ALTER TABLE pedidos_do_telegram ADD COLUMN previsto INTEGER NOT NULL DEFAULT 0`, // S42: bytes que vêm
 		`ALTER TABLE telas ADD COLUMN toca_4k INTEGER NOT NULL DEFAULT 1`,                // S43: o projetor (2K) não toca 4K
 		`ALTER TABLE torrents ADD COLUMN nome_do_titulo TEXT NOT NULL DEFAULT ''`,        // S45: o nome do TMDB, para Downloads
+		`ALTER TABLE favoritos ADD COLUMN pasta_id INTEGER NOT NULL DEFAULT 0`,           // S50: a pasta do favorito, 0 = sem pasta
 	} {
 		if _, err := db.Exec(c); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			db.Close()

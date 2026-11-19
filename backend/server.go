@@ -93,6 +93,11 @@ func newServer(a *app, web fs.FS, version string) http.Handler {
 
 	mux.HandleFunc("GET /api/favoritos", a.handleFavoritos)
 	mux.HandleFunc("GET /api/favoritos/chaves", a.handleChavesFavoritas)
+	mux.HandleFunc("GET /api/favoritos/pastas", a.handlePastas) // S50: favoritos em pastas
+	mux.HandleFunc("POST /api/favoritos/pastas", a.handleCriarPasta)
+	mux.HandleFunc("PATCH /api/favoritos/pastas/{id}", a.handleMudarPasta)
+	mux.HandleFunc("DELETE /api/favoritos/pastas/{id}", a.handleApagarPasta)
+	mux.HandleFunc("GET /api/favoritos/{tipo}/{id}", a.handleEstadoFavorito)
 	mux.HandleFunc("PUT /api/favoritos/{tipo}/{id}", a.handleMarcarFavorito)
 	mux.HandleFunc("DELETE /api/favoritos/{tipo}/{id}", a.handleMarcarFavorito)
 

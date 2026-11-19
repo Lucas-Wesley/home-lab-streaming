@@ -31,8 +31,13 @@ test('do acesso colado até a página da série', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Ação Total (2024)' })).toBeVisible()
   await expect(page.getByText('Um filme de teste.')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Assistir' })).toBeVisible()
+  // Favoritar pede a pasta: criar uma já guarda o favorito nela.
   await page.getByRole('button', { name: 'Favoritar' }).click()
-  await expect(page.getByRole('button', { name: 'Tirar dos favoritos' })).toBeVisible()
+  const folhaPasta = page.getByRole('dialog', { name: 'Favoritar' })
+  await expect(folhaPasta.getByText('Guardar em qual pasta?')).toBeVisible()
+  await folhaPasta.getByLabel('Nome da nova pasta').fill('ING - Teste')
+  await folhaPasta.getByRole('button', { name: 'Criar' }).click()
+  await expect(page.getByRole('button', { name: 'Tirar dos favoritos ou mudar de pasta' })).toBeVisible()
 
   // Série: o próximo episódio e a lista, com o título limpo.
   // Vinda de uma lista rolada, a página da série abre no topo.
@@ -58,12 +63,16 @@ test('do acesso colado até a página da série', async ({ page }) => {
   await expect(page.getByText('Jornal 24h')).toBeVisible()
   await expect(page.getByText('Canal Adulto')).toHaveCount(0)
 
-  // Canal favoritado pela folha; os dois aparecem na aba Favoritos.
+  // Canal favoritado pela folha, sem pasta; os dois aparecem na aba Favoritos.
   await page.getByText('Jornal 24h').click()
   await page.getByRole('dialog').getByRole('button', { name: 'Favoritar' }).click()
-  await page.getByRole('dialog').getByRole('button', { name: 'Fechar' }).click()
+  await page.getByRole('dialog', { name: 'Favoritar' }).getByRole('button', { name: 'Sem pasta' }).click()
+  await expect(page.getByRole('dialog', { name: 'Favoritar' })).toHaveCount(0)
+  await page.getByRole('dialog', { name: 'Jornal 24h' }).getByRole('button', { name: 'Fechar' }).click()
   await page.getByRole('button', { name: 'Favoritos' }).click()
   await expect(page.getByRole('heading', { name: 'Favoritos' })).toBeVisible()
+  await expect(page.getByText('ING - Teste')).toBeVisible()
+  await expect(page.getByText('Sem pasta')).toBeVisible()
   await expect(page.getByText('Jornal 24h')).toBeVisible()
   await expect(page.getByText('Ação Total (2024)')).toBeVisible()
   await expect(page.getByText('Missão Explosiva')).toHaveCount(0)

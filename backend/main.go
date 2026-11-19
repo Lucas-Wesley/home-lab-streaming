@@ -119,15 +119,16 @@ func abrirBanco(caminho string) (*sql.DB, error) {
 		`ALTER TABLE legendas_escolhidas ADD COLUMN escala REAL NOT NULL DEFAULT 1`,  // velocidade (25 × 23,976 quadros)
 		`ALTER TABLE legendas_escolhidas ADD COLUMN ajuste TEXT NOT NULL DEFAULT ''`, // como o atraso foi achado
 		`ALTER TABLE legendas_escolhidas ADD COLUMN alinhando INTEGER NOT NULL DEFAULT 0`,
-		`ALTER TABLE progresso ADD COLUMN tmdb TEXT NOT NULL DEFAULT ''`,                 // "serie/1396": junta a assinatura e os torrents do mesmo título
-		`ALTER TABLE envios_ao_acervo ADD COLUMN pelo_audio INTEGER NOT NULL DEFAULT 0`,  // S41: refazer pelo áudio, sem a legenda
-		`ALTER TABLE meus_videos ADD COLUMN ordem INTEGER NOT NULL DEFAULT 0`,            // S42: o número da mensagem
-		`ALTER TABLE pedidos_do_telegram ADD COLUMN total INTEGER NOT NULL DEFAULT 0`,    // S42: quantos vídeos o grupo tem
-		`ALTER TABLE pedidos_do_telegram ADD COLUMN mensagens TEXT NOT NULL DEFAULT ''`,  // S42: as escolhidas no rastreio
-		`ALTER TABLE pedidos_do_telegram ADD COLUMN previsto INTEGER NOT NULL DEFAULT 0`, // S42: bytes que vêm
-		`ALTER TABLE telas ADD COLUMN toca_4k INTEGER NOT NULL DEFAULT 1`,                // S43: o projetor (2K) não toca 4K
-		`ALTER TABLE torrents ADD COLUMN nome_do_titulo TEXT NOT NULL DEFAULT ''`,        // S45: o nome do TMDB, para Downloads
-		`ALTER TABLE favoritos ADD COLUMN pasta_id INTEGER NOT NULL DEFAULT 0`,           // S50: a pasta do favorito, 0 = sem pasta
+		`ALTER TABLE progresso ADD COLUMN tmdb TEXT NOT NULL DEFAULT ''`,                   // "serie/1396": junta a assinatura e os torrents do mesmo título
+		`ALTER TABLE envios_ao_acervo ADD COLUMN pelo_audio INTEGER NOT NULL DEFAULT 0`,    // S41: refazer pelo áudio, sem a legenda
+		`ALTER TABLE meus_videos ADD COLUMN ordem INTEGER NOT NULL DEFAULT 0`,              // S42: o número da mensagem
+		`ALTER TABLE pedidos_do_telegram ADD COLUMN total INTEGER NOT NULL DEFAULT 0`,      // S42: quantos vídeos o grupo tem
+		`ALTER TABLE pedidos_do_telegram ADD COLUMN tentativas INTEGER NOT NULL DEFAULT 0`, // S56: novas tentativas depois de uma falha no meio
+		`ALTER TABLE pedidos_do_telegram ADD COLUMN mensagens TEXT NOT NULL DEFAULT ''`,    // S42: as escolhidas no rastreio
+		`ALTER TABLE pedidos_do_telegram ADD COLUMN previsto INTEGER NOT NULL DEFAULT 0`,   // S42: bytes que vêm
+		`ALTER TABLE telas ADD COLUMN toca_4k INTEGER NOT NULL DEFAULT 1`,                  // S43: o projetor (2K) não toca 4K
+		`ALTER TABLE torrents ADD COLUMN nome_do_titulo TEXT NOT NULL DEFAULT ''`,          // S45: o nome do TMDB, para Downloads
+		`ALTER TABLE favoritos ADD COLUMN pasta_id INTEGER NOT NULL DEFAULT 0`,             // S50: a pasta do favorito, 0 = sem pasta
 	} {
 		if _, err := db.Exec(c); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			db.Close()

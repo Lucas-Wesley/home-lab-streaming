@@ -447,8 +447,10 @@ func TestAulaDaMensagem(t *testing.T) {
 // mostra o caminho e, depois de baixar, o id; a lixeira da pasta apaga o curso inteiro.
 func TestGrupoDeCursoEmSubpastasELixeiraDaPasta(t *testing.T) {
 	e := novoAmbiente(t)
-	comTdlFalso(t)
+	args := comTdlFalso(t)
 	t.Setenv("TDL_FALSO_CURSO", "1")
+	t.Setenv("TDL_LIMITE", "4") // S56: o paralelismo vem do ambiente
+	t.Setenv("TDL_PARTES", "8")
 
 	var rastreio struct {
 		Videos []videoDoGrupo `json:"videos"`
@@ -469,6 +471,9 @@ func TestGrupoDeCursoEmSubpastasELixeiraDaPasta(t *testing.T) {
 	p := pedirEBaixar(t, e, map[string]any{"link": "https://t.me/c/1234567890", "pasta": "Grupo Inventado", "tudo": true, "mensagens": []int64{50, 51}})
 	if p.Estado != "pronto" || p.Videos != 2 {
 		t.Fatalf("%+v", p)
+	}
+	if usados, _ := os.ReadFile(args); !strings.Contains(string(usados), "-l\n4\n-t\n8\n") {
+		t.Fatalf("paralelismo:\n%s", usados)
 	}
 	var r respostaDosMeusVideos
 	e.json(t, "/api/meus-videos", &r)
@@ -508,5 +513,32 @@ func TestGrupoDeCursoEmSubpastasELixeiraDaPasta(t *testing.T) {
 	e.json(t, "/api/meus-videos", &r)
 	if len(r.Videos) != 0 {
 		t.Fatalf("%+v", r.Videos)
+	}
+}
+
+// S56: o tdl caiu no meio (erro interno): o pedido volta sozinho para a fila, sem aviso, até 3 vezes;
+// depois fica com o erro, mostrando a linha do "panic:". Tentar de novo à mão zera a conta.
+func TestTelegramTentaDeNovoDepoisDeUmaQueda(t *testing.T) {
+	e := novoAmbiente(t)
+	comTdlFalso(t)
+	t.Setenv("TDL_FALSO_ERRO", "x\npanic: runtime error: index out of range\ngoroutine 1 [running]:\nerrgroup.go:78 +0x95")
+	p := pedirEBaixar(t, e, map[string]any{"link": "https://t.me/c/1234567890", "pasta": "Curso", "tudo": true})
+	if p.Estado != "na fila" || !strings.Contains(p.Mensagem, "tentando de novo (1 de 3)") {
+		t.Fatalf("%+v", p)
+	}
+	for i := 0; i < 3; i++ {
+		e.a.baixarDoTelegram(context.Background(), p.ID)
+	}
+	p, _ = e.a.pedidoDe(context.Background(), p.ID)
+	if p.Estado != "erro" || !strings.Contains(p.Mensagem, "panic: runtime error") {
+		t.Fatalf("%+v", p)
+	}
+	if status, _ := e.pedir(t, "POST", fmt.Sprintf("/api/meus-videos/telegram/%d/retomar", p.ID), nil); status != 200 {
+		t.Fatal(status)
+	}
+	var feitas int
+	e.a.db.QueryRow(`SELECT tentativas FROM pedidos_do_telegram WHERE id = ?`, p.ID).Scan(&feitas)
+	if feitas != 0 {
+		t.Fatal(feitas)
 	}
 }

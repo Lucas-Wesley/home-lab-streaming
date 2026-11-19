@@ -98,6 +98,16 @@ type pedidoDoTelegram struct {
 
 func programaTdl() string { return env("TDL_BIN", "tdl") }
 
+// paralelismoDoTdl (S56): quantos arquivos o tdl baixa ao mesmo tempo (-l) e em quantas partes cada
+// um (-t). O padrão do tdl é 2 e 4; o compose de produção pode subir (TDL_LIMITE, TDL_PARTES).
+func paralelismoDoTdl() []string {
+	return []string{"-l", env("TDL_LIMITE", "2"), "-t", env("TDL_PARTES", "4")}
+}
+
+// tentativasDoTelegram: quantas vezes um pedido volta sozinho para a fila depois de o tdl cair no
+// meio (S56). O que já veio fica; a nova tentativa pega só o resto.
+const tentativasDoTelegram = 3
+
 func tdlDisponivel() bool {
 	_, err := exec.LookPath(programaTdl())
 	return err == nil
@@ -488,6 +498,15 @@ func explicarErroDoTdl(saida string, err error) string {
 		return "A sessão do Telegram está aberta em outro lugar (outro tdl rodando no servidor)."
 	}
 	linhas := strings.Split(strings.TrimSpace(saida), "\n")
+	// Erro interno do tdl: a linha que interessa é a do "panic:", não o fim da pilha.
+	for _, l := range linhas {
+		if strings.HasPrefix(strings.TrimSpace(l), "panic:") {
+			if l = strings.TrimSpace(l); len(l) > 300 {
+				l = l[:300]
+			}
+			return "O tdl falhou: " + l
+		}
+	}
 	if n := len(linhas); n > 0 && linhas[n-1] != "" {
 		ultima := linhas[n-1]
 		for i := n - 1; i >= 0 && i >= n-4; i-- {
@@ -876,7 +895,8 @@ func (a *app) baixarDoTelegram(ctx context.Context, id int64) {
 		// Cada vídeo vai para a pasta assim que termina: dá para assistir antes do fim, e o que
 		// já veio fica mesmo se o pedido for cancelado.
 		err = g.enquanto(ctx, func() error {
-			_, err := a.tdl(c, sessao, "dl", "-f", caminho, "-d", tmp, "--restart", "--template", modelo)
+			args := append([]string{"dl", "-f", caminho, "-d", tmp, "--restart", "--template", modelo}, paralelismoDoTdl()...)
+			_, err := a.tdl(c, sessao, args...)
 			return err
 		})
 		if err != nil {
@@ -930,7 +950,29 @@ func (a *app) depoisDoErro(ctx, c context.Context, id int64, err error, falhar f
 		falhar("Cancelado.")
 		return
 	}
+	// Queda no meio (o tdl às vezes cai num erro interno, e a mesma mensagem baixa bem logo
+	// depois): volta para a fila sozinho, sem aviso, até tentativasDoTelegram vezes (S56).
+	if ctx.Err() == nil && erroPassageiro(err.Error()) {
+		var feitas int
+		a.db.QueryRowContext(ctx, `SELECT tentativas FROM pedidos_do_telegram WHERE id = ?`, id).Scan(&feitas)
+		if feitas < tentativasDoTelegram {
+			a.db.ExecContext(ctx, `UPDATE pedidos_do_telegram SET estado = 'na fila', tentativas = tentativas + 1, mensagem = ? WHERE id = ?`,
+				fmt.Sprintf("O Telegram falhou no meio: tentando de novo (%d de %d).", feitas+1, tentativasDoTelegram), id)
+			return
+		}
+	}
 	falhar(err.Error())
+}
+
+// erroPassageiro: falha que uma nova tentativa pode resolver. Sem login, sem acesso ao grupo ou
+// mensagem apagada não passam tentando de novo.
+func erroPassageiro(msg string) bool {
+	for _, fixo := range []string{"O Telegram não está conectado", "A conta não tem acesso", "Mensagem não encontrada", "A sessão do Telegram está aberta", "não está instalado"} {
+		if strings.Contains(msg, fixo) {
+			return false
+		}
+	}
+	return true
 }
 
 // guardaDoPedido leva os vídeos prontos da pasta temporária para Meus vídeos, com o nome certo.
@@ -1201,7 +1243,7 @@ func (a *app) handleRetomarPedido(w http.ResponseWriter, r *http.Request) {
 		erroJSON(w, http.StatusBadRequest, "Pedido inválido.")
 		return
 	}
-	a.db.ExecContext(r.Context(), `UPDATE pedidos_do_telegram SET estado = 'na fila', mensagem = '' WHERE id = ? AND estado = 'erro'`, id)
+	a.db.ExecContext(r.Context(), `UPDATE pedidos_do_telegram SET estado = 'na fila', mensagem = '', tentativas = 0 WHERE id = ? AND estado = 'erro'`, id)
 	a.acordarTelegram()
 	p, err := a.pedidoDe(r.Context(), id)
 	if err != nil {

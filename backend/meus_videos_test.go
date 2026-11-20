@@ -542,3 +542,28 @@ func TestTelegramTentaDeNovoDepoisDeUmaQueda(t *testing.T) {
 		t.Fatal(feitas)
 	}
 }
+
+// S57: disco que não dá para ler não é pasta vazia: a sincronização para sem apagar nada do banco
+// e a lista sai do banco com um aviso.
+func TestDiscoIlegivelNaoApagaOsVideos(t *testing.T) {
+	e := novoAmbiente(t)
+	dir := filepath.Join(e.a.pastaDosMeusVideos(), "Curso")
+	os.MkdirAll(dir, 0o755)
+	os.WriteFile(filepath.Join(dir, "aula.mp4"), []byte("v"), 0o644)
+	var r struct {
+		Videos []meuVideo `json:"videos"`
+		Aviso  string     `json:"aviso"`
+	}
+	e.json(t, "/api/meus-videos", &r)
+	if len(r.Videos) != 1 || r.Aviso != "" {
+		t.Fatalf("%+v", r)
+	}
+	// A pasta raiz some do jeito que um disco travado some: existe, mas não dá para ler.
+	raiz := e.a.pastaDosMeusVideos()
+	os.Chmod(raiz, 0o000)
+	defer os.Chmod(raiz, 0o755)
+	e.json(t, "/api/meus-videos", &r)
+	if len(r.Videos) != 1 || !strings.Contains(r.Aviso, "não consegui ler") {
+		t.Fatalf("o vídeo devia continuar no banco, com aviso: %+v", r)
+	}
+}

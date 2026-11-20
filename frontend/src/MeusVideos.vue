@@ -351,6 +351,7 @@ onBeforeUnmount(() => clearInterval(relogioDaFila))
       <button v-if="!adicionando" class="botao principal" @click="adicionando = true">Baixar do Telegram</button>
     </div>
     <div v-if="erro" class="aviso erro">{{ erro }}</div>
+    <div v-if="dados?.aviso" class="aviso erro">{{ dados.aviso }} A lista abaixo é a do banco; nada foi apagado.</div>
     <div v-if="dados && !dados.telegram.instalado" class="aviso erro">O tdl não está instalado no servidor: dá para ver os vídeos, mas não baixar novos.</div>
 
     <form v-if="adicionando" ref="formulario" class="cartao formulario" @submit.prevent="pedir">

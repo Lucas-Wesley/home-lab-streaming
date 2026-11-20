@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -193,8 +194,16 @@ func (a *app) sincronizarMeusVideos(ctx context.Context) error {
 	noDisco := map[string]os.FileInfo{}
 	// Pastas em qualquer nível (curso › módulo, S55); as que começam com ponto (.capas, .baixando)
 	// ficam de fora, e os arquivos soltos na raiz também (todo vídeo tem pasta).
+	// Disco com defeito ou desconectado (S57): qualquer pasta que não dê para ler aborta a
+	// sincronização, sem apagar nada do banco. "Não consegui ler" não é "a pasta está vazia":
+	// em 20/11/2026 o SSD travou e a sincronização tirou do banco todos os 1.205 vídeos.
+	var falhaDeLeitura error
 	filepath.WalkDir(raiz, func(caminho string, d os.DirEntry, err error) error {
-		if err != nil || caminho == raiz {
+		if err != nil {
+			falhaDeLeitura = err
+			return filepath.SkipAll
+		}
+		if caminho == raiz {
 			return nil
 		}
 		if strings.HasPrefix(d.Name(), ".") {
@@ -216,6 +225,9 @@ func (a *app) sincronizarMeusVideos(ctx context.Context) error {
 		}
 		return nil
 	})
+	if falhaDeLeitura != nil {
+		return fmt.Errorf("não consegui ler a pasta dos meus vídeos (o disco está com defeito ou desconectado?): %w", falhaDeLeitura)
+	}
 	rows, err := a.db.QueryContext(ctx, `SELECT id, arquivo FROM meus_videos`)
 	if err != nil {
 		return err
@@ -1103,9 +1115,11 @@ func tamanhoDaPasta(dir string) int64 {
 // ---------- Rotas ----------
 
 func (a *app) handleMeusVideos(w http.ResponseWriter, r *http.Request) {
+	// Disco fora (S57): a lista sai do banco, com o aviso, em vez de a página quebrar.
+	aviso := ""
 	if err := a.sincronizarMeusVideos(r.Context()); err != nil {
-		falha(w, err)
-		return
+		log.Printf("meus vídeos: %v", err)
+		aviso = err.Error()
 	}
 	videos, err := a.listarMeusVideos(r.Context())
 	if err != nil {
@@ -1128,6 +1142,7 @@ func (a *app) handleMeusVideos(w http.ResponseWriter, r *http.Request) {
 		"salvos":   salvos,
 		"livre":    espacoLivre(a.pastaDosMeusVideos()),
 		"telegram": map[string]bool{"instalado": tdlDisponivel()},
+		"aviso":    aviso,
 	})
 }
 

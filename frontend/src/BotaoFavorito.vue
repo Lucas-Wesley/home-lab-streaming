@@ -7,6 +7,7 @@ import { carregarFavoritos, favoritos } from './favoritos.js'
 const props = defineProps({
   tipo: { type: String, required: true },
   id: { type: [String, Number], required: true },
+  dados: { type: Object, default: () => ({}) },
 })
 const marcado = computed(() => favoritos.value.has(`${props.tipo}:${props.id}`))
 const escolhendo = ref(false)
@@ -24,7 +25,7 @@ onMounted(carregarFavoritos)
   >
     <Icone :nome="marcado ? 'favorito-cheio' : 'favorito'" />{{ marcado ? 'Favorito' : 'Favoritar' }}
   </button>
-  <FolhaDePastas v-if="escolhendo" :tipo="tipo" :id="id" @fechar="escolhendo = false" />
+  <FolhaDePastas v-if="escolhendo" :tipo="tipo" :id="id" :dados="dados" @fechar="escolhendo = false" />
 </template>
 
 <style scoped>

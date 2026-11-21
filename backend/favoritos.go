@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -20,7 +21,23 @@ CREATE TABLE IF NOT EXISTS pastas (
 	nome      TEXT NOT NULL COLLATE NOCASE UNIQUE,
 	criada_em TEXT NOT NULL
 );
+-- S58: títulos do TMDB favoritados sem estar no catálogo (tipo "tmdb-filme" ou "tmdb-serie", id do TMDB);
+-- guardam o que a aba Favoritos precisa mostrar. A marca em si fica em favoritos, com a pasta.
+CREATE TABLE IF NOT EXISTS favoritos_tmdb (
+	tipo TEXT NOT NULL,
+	id   INTEGER NOT NULL,
+	nome TEXT NOT NULL,
+	capa TEXT NOT NULL DEFAULT '',
+	ano  TEXT NOT NULL DEFAULT '',
+	nota REAL NOT NULL DEFAULT 0,
+	PRIMARY KEY (tipo, id)
+);
 `
+
+// Favorito do TMDB (S58): vale para quem não está na assinatura. A chave é "tmdb-filme:<id do TMDB>".
+var tiposFavoritosTMDB = map[string]bool{"tmdb-filme": true, "tmdb-serie": true}
+
+func tipoDeFavorito(tipo string) bool { return tiposValidos[tipo] || tiposFavoritosTMDB[tipo] }
 
 type pasta struct {
 	ID   int64  `json:"id"`
@@ -54,23 +71,22 @@ func (a *app) pastas(ctx context.Context) ([]pasta, error) {
 // handleFavoritos: as pastas com os itens delas (numa lista só, na ordem da marca) e, em "itens",
 // os sem pasta por tipo.
 func (a *app) handleFavoritos(w http.ResponseWriter, r *http.Request) {
-	rows, err := a.db.QueryContext(r.Context(), `SELECT `+colunasDoItem+`, f.pasta_id FROM favoritos f
+	rows, err := a.db.QueryContext(r.Context(), `SELECT `+colunasDoItem+`, f.pasta_id, f.marcado_em FROM favoritos f
 		JOIN itens i ON i.tipo = f.tipo AND i.id = f.id
 		ORDER BY f.marcado_em DESC`)
 	if err != nil {
 		falha(w, err)
 		return
 	}
-	marcados := []struct {
+	type marcado struct {
 		it    item
 		pasta int64
-	}{}
+		em    string
+	}
+	marcados := []marcado{}
 	for rows.Next() {
-		var m struct {
-			it    item
-			pasta int64
-		}
-		if err := rows.Scan(&m.it.Tipo, &m.it.ID, &m.it.Nome, &m.it.Capa, &m.it.Nota, &m.it.Ano, &m.it.Extensao, &m.pasta); err != nil {
+		var m marcado
+		if err := rows.Scan(&m.it.Tipo, &m.it.ID, &m.it.Nome, &m.it.Capa, &m.it.Nota, &m.it.Ano, &m.it.Extensao, &m.pasta, &m.em); err != nil {
 			rows.Close()
 			falha(w, err)
 			return
@@ -78,6 +94,29 @@ func (a *app) handleFavoritos(w http.ResponseWriter, r *http.Request) {
 		marcados = append(marcados, m)
 	}
 	rows.Close()
+
+	// Os do TMDB (S58) entram como filme ou série, com a página do título; a chave guarda a marca.
+	doTMDB, err := a.db.QueryContext(r.Context(), `SELECT t.tipo, t.id, t.nome, t.capa, t.nota, t.ano, f.pasta_id, f.marcado_em
+		FROM favoritos f JOIN favoritos_tmdb t ON t.tipo = f.tipo AND t.id = f.id`)
+	if err != nil {
+		falha(w, err)
+		return
+	}
+	for doTMDB.Next() {
+		var m marcado
+		var tipo string
+		if err := doTMDB.Scan(&tipo, &m.it.ID, &m.it.Nome, &m.it.Capa, &m.it.Nota, &m.it.Ano, &m.pasta, &m.em); err != nil {
+			doTMDB.Close()
+			falha(w, err)
+			return
+		}
+		m.it.Tipo = strings.TrimPrefix(tipo, "tmdb-")
+		m.it.Chave = tipo + ":" + strconv.FormatInt(m.it.ID, 10)
+		m.it.Pagina = "#/titulo/" + m.it.Tipo + "/" + strconv.FormatInt(m.it.ID, 10)
+		marcados = append(marcados, m)
+	}
+	doTMDB.Close()
+	sort.SliceStable(marcados, func(i, j int) bool { return marcados[i].em > marcados[j].em })
 
 	pastas, err := a.pastas(r.Context())
 	if err != nil {
@@ -144,7 +183,7 @@ func (a *app) handleChavesFavoritas(w http.ResponseWriter, r *http.Request) {
 func (a *app) handleEstadoFavorito(w http.ResponseWriter, r *http.Request) {
 	tipo := r.PathValue("tipo")
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if !tiposValidos[tipo] || err != nil {
+	if !tipoDeFavorito(tipo) || err != nil {
 		erroJSON(w, http.StatusNotFound, "Item inválido.")
 		return
 	}
@@ -157,27 +196,37 @@ func (a *app) handleEstadoFavorito(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"marcado": err == nil, "pasta": pasta})
 }
 
+// O corpo do PUT: a pasta e, só nos títulos do TMDB (S58), o que a aba Favoritos mostra.
+type corpoDoFavorito struct {
+	Pasta int64   `json:"pasta"`
+	Nome  string  `json:"nome"`
+	Capa  string  `json:"capa"`
+	Ano   string  `json:"ano"`
+	Nota  float64 `json:"nota"`
+}
+
 // handleMarcarFavorito: PUT marca (a pasta vem no corpo, 0 = sem pasta) e DELETE desmarca. Um PUT
 // de novo no mesmo item só muda a pasta: a data da marca fica.
 func (a *app) handleMarcarFavorito(w http.ResponseWriter, r *http.Request) {
 	tipo := r.PathValue("tipo")
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if !tiposValidos[tipo] || err != nil {
+	if !tipoDeFavorito(tipo) || err != nil {
 		erroJSON(w, http.StatusNotFound, "Item inválido.")
 		return
 	}
 	if r.Method == http.MethodDelete {
 		_, err = a.db.ExecContext(r.Context(), `DELETE FROM favoritos WHERE tipo = ? AND id = ?`, tipo, id)
+		if err == nil && tiposFavoritosTMDB[tipo] {
+			_, err = a.db.ExecContext(r.Context(), `DELETE FROM favoritos_tmdb WHERE tipo = ? AND id = ?`, tipo, id)
+		}
 	} else {
 		var pasta int64
+		var dados corpoDoFavorito
 		if r.ContentLength != 0 {
-			var corpo struct {
-				Pasta int64 `json:"pasta"`
-			}
-			if !lerCorpo(w, r, &corpo) {
+			if !lerCorpo(w, r, &dados) {
 				return
 			}
-			pasta = corpo.Pasta
+			pasta = dados.Pasta
 		}
 		if pasta != 0 {
 			var n int
@@ -187,6 +236,22 @@ func (a *app) handleMarcarFavorito(w http.ResponseWriter, r *http.Request) {
 			}
 			if n == 0 {
 				erroJSON(w, http.StatusNotFound, "Pasta não encontrada.")
+				return
+			}
+		}
+		if tiposFavoritosTMDB[tipo] {
+			nome := strings.TrimSpace(dados.Nome)
+			if nome == "" {
+				var n int
+				a.db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM favoritos_tmdb WHERE tipo = ? AND id = ?`, tipo, id).Scan(&n)
+				if n == 0 {
+					erroJSON(w, http.StatusBadRequest, "Faltou o nome do título.")
+					return
+				}
+			} else if _, err := a.db.ExecContext(r.Context(), `INSERT INTO favoritos_tmdb (tipo, id, nome, capa, ano, nota) VALUES (?, ?, ?, ?, ?, ?)
+				ON CONFLICT (tipo, id) DO UPDATE SET nome = excluded.nome, capa = excluded.capa, ano = excluded.ano, nota = excluded.nota`,
+				tipo, id, nome, dados.Capa, dados.Ano, dados.Nota); err != nil {
+				falha(w, err)
 				return
 			}
 		}

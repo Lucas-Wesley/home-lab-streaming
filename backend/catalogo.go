@@ -268,6 +268,7 @@ type item struct {
 	// Só na busca do Início (S28): de onde vem e, para os títulos do TMDB, a página deles.
 	Origem string `json:"origem,omitempty"` // assinatura ou torrent
 	Pagina string `json:"pagina,omitempty"`
+	Chave  string `json:"chave,omitempty"` // S58: a chave do favorito, quando não é tipo:id (título do TMDB)
 	tmdb   int    // o título do TMDB, quando já se sabe (assinatura_tmdb)
 }
 

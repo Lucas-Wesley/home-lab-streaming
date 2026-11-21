@@ -114,3 +114,50 @@ func TestPastasDeFavoritos(t *testing.T) {
 		t.Fatalf("chaves no fim: %v", chaves)
 	}
 }
+
+// S58: título do TMDB fora da assinatura também vai para os favoritos, com pasta, e some ao desmarcar.
+func TestFavoritoDeTituloDoTMDB(t *testing.T) {
+	e := novoAmbiente(t)
+	if s, _ := e.pedir(t, "PUT", "/api/favoritos/tmdb-filme/777", nil); s != http.StatusBadRequest {
+		t.Fatalf("sem nome: %d", s)
+	}
+	dados := map[string]any{"pasta": 0, "nome": "O Silêncio do Lago", "capa": "http://x/c.jpg", "ano": "1993", "nota": 7.4}
+	if s, r := e.pedir(t, "PUT", "/api/favoritos/tmdb-filme/777", dados); s != http.StatusNoContent {
+		t.Fatalf("favoritar: %d %s", s, r)
+	}
+	if s, r := e.pedir(t, "PUT", "/api/favoritos/filme/200", nil); s != http.StatusNoContent {
+		t.Fatalf("favoritar do catálogo: %d %s", s, r)
+	}
+	var chaves []string
+	e.json(t, "/api/favoritos/chaves", &chaves)
+	if len(chaves) != 2 {
+		t.Fatalf("chaves: %v", chaves)
+	}
+	var pagina struct {
+		Itens favoritosPorTipo `json:"itens"`
+	}
+	e.json(t, "/api/favoritos", &pagina)
+	if len(pagina.Itens.Filme) != 2 {
+		t.Fatalf("filmes: %+v", pagina.Itens.Filme)
+	}
+	var achou item
+	for _, it := range pagina.Itens.Filme {
+		if it.Chave != "" {
+			achou = it
+		}
+	}
+	if achou.Nome != "O Silêncio do Lago" || achou.Chave != "tmdb-filme:777" || achou.Pagina != "#/titulo/filme/777" || achou.Ano != "1993" {
+		t.Fatalf("item do TMDB: %+v", achou)
+	}
+	// Só mudar a pasta, sem repetir o nome, mantém os dados.
+	if s, r := e.pedir(t, "PUT", "/api/favoritos/tmdb-filme/777", map[string]int64{"pasta": 0}); s != http.StatusNoContent {
+		t.Fatalf("de novo: %d %s", s, r)
+	}
+	if s, r := e.pedir(t, "DELETE", "/api/favoritos/tmdb-filme/777", nil); s != http.StatusNoContent {
+		t.Fatalf("desfavoritar: %d %s", s, r)
+	}
+	e.json(t, "/api/favoritos", &pagina)
+	if len(pagina.Itens.Filme) != 1 {
+		t.Fatalf("depois de desmarcar: %+v", pagina.Itens.Filme)
+	}
+}

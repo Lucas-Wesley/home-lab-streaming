@@ -10,6 +10,7 @@ import { carregarPastas, criarPasta, desfavoritar, favoritar, pastas } from './f
 const props = defineProps({
   tipo: { type: String, required: true },
   id: { type: [String, Number], required: true },
+  dados: { type: Object, default: () => ({}) }, // S58: nome, capa, ano e nota de um título do TMDB
 })
 const emit = defineEmits(['fechar'])
 const recado = inject('recado')
@@ -26,7 +27,7 @@ function nomeDaPasta(id) {
 async function escolher(pasta) {
   ocupado.value = true
   try {
-    await favoritar(props.tipo, props.id, pasta)
+    await favoritar(props.tipo, props.id, pasta, props.dados)
     recado(marcado.value ? (pasta ? `Movido para ${nomeDaPasta(pasta)}.` : 'Fora da pasta, segue nos favoritos.') : 'Nos favoritos.')
     emit('fechar')
   } catch (e) {
@@ -42,7 +43,7 @@ async function criar() {
   ocupado.value = true
   try {
     const p = await criarPasta(nome)
-    await favoritar(props.tipo, props.id, p.id)
+    await favoritar(props.tipo, props.id, p.id, props.dados)
     recado(`Nos favoritos, na pasta ${p.nome}.`)
     emit('fechar')
   } catch (e) {

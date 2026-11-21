@@ -30,14 +30,15 @@ export async function criarPasta(nome) {
 
 // Marca na hora e desfaz se o servidor recusar. pasta 0 é "sem pasta"; de novo no mesmo item só
 // muda a pasta.
-export async function favoritar(tipo, id, pasta = 0) {
+// `dados` (nome, capa, ano, nota) só vai nos títulos do TMDB (S58), que não estão no catálogo.
+export async function favoritar(tipo, id, pasta = 0, dados = {}) {
   const chave = `${tipo}:${id}`
   const era = favoritos.value.has(chave)
   const novo = new Set(favoritos.value)
   novo.add(chave)
   favoritos.value = novo
   try {
-    await api(`/api/favoritos/${tipo}/${id}`, { metodo: 'PUT', corpo: { pasta } })
+    await api(`/api/favoritos/${tipo}/${id}`, { metodo: 'PUT', corpo: { pasta, ...dados } })
   } catch (e) {
     const volta = new Set(favoritos.value)
     era ? volta.add(chave) : volta.delete(chave)

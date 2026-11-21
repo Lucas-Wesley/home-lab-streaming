@@ -342,6 +342,8 @@ watch(temporada, (n) => {
   carregarEpisodios(n)
 })
 
+const dadosDoFavorito = computed(() => ({ nome: titulo.value?.titulo || '', capa: titulo.value?.capa || '', ano: titulo.value?.ano || '', nota: titulo.value?.nota || 0 }))
+
 const meta = computed(() => {
   const t = titulo.value
   if (!t) return []
@@ -600,6 +602,10 @@ onMounted(async () => {
           <div v-if="assinatura.length" class="linha-acoes assinatura-e-favorito">
             <p class="na-assinatura"><Icone nome="canais" />Está na sua assinatura</p>
             <BotaoFavorito :tipo="assinatura[0].tipo" :id="assinatura[0].id" />
+          </div>
+          <!-- Fora da assinatura (S58): o favorito é o próprio título do TMDB -->
+          <div v-else class="linha-acoes assinatura-e-favorito">
+            <BotaoFavorito :tipo="`tmdb-${tipo}`" :id="id" :dados="dadosDoFavorito" />
           </div>
           <p v-if="mostrarIngles" class="ingles">
             <button v-if="nivel" class="chip-ingles" :class="nivel.medidas.dificuldade" type="button" @click="vendoIngles = true">

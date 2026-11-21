@@ -19,7 +19,7 @@ const GRUPOS = [
   { tipo: 'serie', nome: 'Séries' },
 ]
 
-const visiveis = (itens) => (itens || []).filter((it) => favoritos.value.has(`${it.tipo}:${it.id}`))
+const visiveis = (itens) => (itens || []).filter((it) => favoritos.value.has(it.chave || `${it.tipo}:${it.id}`))
 const quantos = (n) => `${n} ${n === 1 ? 'item' : 'itens'}`
 
 const pastas = computed(() => (lista.value?.pastas || []).map((p) => ({ ...p, itens: visiveis(p.itens) })))
